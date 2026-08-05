@@ -26,8 +26,10 @@ final class RecordingSink implements ExecutionSink {
             long quantity,
             long aggressorId,
             Side aggressorSide,
+            long aggressorPrice,
             long restingId,
-            Side restingSide) {}
+            Side restingSide,
+            long restingSequence) {}
 
     private final List<Trade> trades = new ArrayList<>();
     private final List<String> events = new ArrayList<>();
@@ -70,8 +72,10 @@ final class RecordingSink implements ExecutionSink {
                 quantity,
                 aggressor.orderId(),
                 aggressor.side(),
+                aggressor.price(),
                 resting.orderId(),
-                resting.side()));
+                resting.side(),
+                resting.sequence()));
         filledByOrder.merge(aggressor.orderId(), quantity, Long::sum);
         filledByOrder.merge(resting.orderId(), quantity, Long::sum);
         events.add("trade:" + quantity + "@" + price);
