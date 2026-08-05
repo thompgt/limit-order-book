@@ -125,7 +125,7 @@ These are load-bearing, not style preferences. An enforcement test guards each.
 ./mvnw -q test                       # unit + property tests
 ./mvnw -B verify                     # full build, what CI runs
 ./mvnw -pl engine-api spring-boot:run        # run the API on :8080
-./mvnw -pl engine-bench -am -Pbench exec:exec # JMH throughput + latency + gc profile
+./mvnw -pl engine-bench -am -Pbench verify   # JMH throughput + latency + gc profile
 ```
 
 Phase roadmap and current progress live in [`docs/WORKPLAN.md`](docs/WORKPLAN.md).
