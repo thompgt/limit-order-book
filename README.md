@@ -53,8 +53,8 @@ On Windows PowerShell use `.\mvnw.cmd` in place of `./mvnw`.
 
 ## Results
 
-> Not yet measured. This table is filled in from real benchmark runs once the
-> engine lands (see [`docs/WORKPLAN.md`](docs/WORKPLAN.md) phase 4). Every
+> Not yet measured. The engine is complete; this table is filled in from real
+> benchmark runs in [`docs/WORKPLAN.md`](docs/WORKPLAN.md) phase 4. Every
 > number here will carry the exact command that produced it and the machine it
 > ran on — nothing goes in this table that a reader cannot re-run.
 
@@ -71,11 +71,33 @@ Latency is measured with a fixed-rate submitter and HdrHistogram's
 `recordValueWithExpectedInterval`, so the tail is corrected for coordinated
 omission rather than flattered by it.
 
+## Skills this project exercises
+
+Each row points at the code that backs it, so the claim can be checked rather
+than taken on trust. Rows marked *planned* are roadmap, not yet built — see
+[`docs/WORKPLAN.md`](docs/WORKPLAN.md).
+
+| Skill | Where it shows up |
+|---|---|
+| **Trading systems** | Price-time priority matching, aggressive-order sweeps across levels, partial fills, DAY / IOC / FOK, market orders, and the modify priority rules above — `MatchingEngine`, `OrderBook`, `PriceLevel` |
+| **Trade booking** | The execution-report lifecycle: accept → trade → fill / rest / cancel / replace, each event carrying trade id, sequence, price and quantity, emitted in the order it happened — `ExecutionSink`, `SubmitResult`, `CancelResult` |
+| **Market data** | L2 depth snapshots aggregated per price level, maintained incrementally so a snapshot is O(1) per level rather than a queue walk — `OrderBook.snapshot`, `DepthVisitor`. Streaming it over WebSocket is *planned* (phase 5) |
+| **Java** | Java 21, no framework and no Lombok in the core: intrusive doubly-linked lists, an ownership contract on recycled objects, sealed-off package-private mutation, and a test suite that names the semantics it pins — 195 tests, 22 of them property-based with jqwik |
+| **Low-latency JVM engineering** | The reason for most of the above: object pooling (`OrderPool`), primitive-keyed maps to avoid boxing (`OrderIndex`), reused result objects, callbacks instead of returned collections, and JMH + HdrHistogram with coordinated-omission correction. Benchmarks are *planned* (phase 4) |
+| **Spring** | Spring Boot 3.5 as an API and ops layer around the engine — REST, WebSocket, actuator, and a single-consumer command queue that keeps the engine single-threaded under concurrent HTTP. Scaffolded in `engine-api`; the endpoints are *planned* (phase 5) |
+
+The split is deliberate and is the main design idea here: Spring never touches
+`engine-core`, because a framework sitting in the measured path would make the
+latency numbers meaningless. An architecture test enforces that in phase 5.
+
 ## Status
 
-Phase 0 (scaffold) complete. Progress tracked in
-[`docs/WORKPLAN.md`](docs/WORKPLAN.md); working conventions in
-[`CLAUDE.md`](CLAUDE.md).
+Phases 0–3 complete: scaffold, core data structures, matching, and
+cancel / modify / time-in-force. 195 tests green in `engine-core`.
+Benchmarks (phase 4) and the REST/WebSocket API (phase 5) are next.
+
+Progress tracked in [`docs/WORKPLAN.md`](docs/WORKPLAN.md); working conventions
+in [`CLAUDE.md`](CLAUDE.md).
 
 ## License
 
