@@ -60,6 +60,11 @@
     -->
     <profile>
       <id>bench</id>
+      <properties>
+        <!-- Override on the command line, e.g. -Dbench.rate=1000000 -->
+        <bench.rate>500000</bench.rate>
+        <bench.seconds>20</bench.seconds>
+      </properties>
       <build>
         <plugins>
           <plugin>
@@ -114,6 +119,32 @@
                     <argument>json</argument>
                     <argument>-rff</argument>
                     <argument>${project.build.directory}/jmh-result.json</argument>
+                  </arguments>
+                </configuration>
+              </execution>
+
+              <!-- Throughput and latency answer different questions, so they
+                   are measured separately. JMH runs the engine as fast as it
+                   will go; the harness below offers a fixed rate and reports
+                   what the tail looks like from the caller's side. -->
+              <execution>
+                <id>run-latency-harness</id>
+                <phase>verify</phase>
+                <goals><goal>exec</goal></goals>
+                <configuration>
+                  <executable>${java.home}/bin/java</executable>
+                  <arguments>
+                    <argument>-Xms2g</argument>
+                    <argument>-Xmx2g</argument>
+                    <argument>-cp</argument>
+                    <argument>${project.build.directory}/benchmarks.jar</argument>
+                    <argument>io.github.thompgt.lob.bench.LatencyHarness</argument>
+                    <argument>--rate</argument>
+                    <argument>${bench.rate}</argument>
+                    <argument>--seconds</argument>
+                    <argument>${bench.seconds}</argument>
+                    <argument>--out</argument>
+                    <argument>${project.build.directory}/latency.txt</argument>
                   </arguments>
                 </configuration>
               </execution>
