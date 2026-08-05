@@ -28,13 +28,22 @@ Ladders are `TreeMap<Long, PriceLevel>` as planned. This boxes a `Long` key
 per lookup; the swap to a primitive-keyed sorted structure waits on a phase 4
 benchmark saying it is the bottleneck — correct first, fast second.
 
-## Phase 2 — Matching
+## Phase 2 — Matching ✅
 
-- [ ] Aggressive-order crossing, sweeping multiple levels
-- [ ] Partial fills; resting remainder
-- [ ] Execution report events into a preallocated sink
-- [ ] Property test: filled buy qty == filled sell qty for any order sequence
-- [ ] Property test: the book is never left crossed (`bestBid < bestAsk`)
+- [x] Aggressive-order crossing, sweeping multiple levels
+- [x] Partial fills; resting remainder
+- [x] Execution report events into a preallocated sink
+- [x] Property test: filled buy qty == filled sell qty for any order sequence
+- [x] Property test: the book is never left crossed (`bestBid < bestAsk`)
+- [x] `OrderPool` — orders recycled, so steady-state churn stops allocating
+- [x] Tests — 120 green in `engine-core`, 11 of them properties
+
+Both property groups were mutation-checked rather than trusted: filling
+newest-first instead of oldest-first, and dropping the limit-price check, each
+fail the suite. A property that cannot fail is decoration.
+
+IOC, FOK and market orders are rejected with `UNSUPPORTED_TIME_IN_FORCE` until
+phase 3 — refused loudly rather than silently treated as DAY.
 
 ## Phase 3 — Cancel / modify / time-in-force
 
