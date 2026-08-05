@@ -16,17 +16,17 @@ Commits happen after each small unit inside a phase, not at the phase boundary.
 - [x] CI workflow (green on GitHub Actions, JDK 21)
 - [x] Public repo pushed — https://github.com/thompgt/limit-order-book
 
-## Phase 1 — Core data structures
+## Phase 1 — Core data structures ✅
 
-- [ ] `Order` — mutable, pooled, intrusively doubly-linked (`prev`/`next`)
-- [ ] `PriceLevel` — FIFO queue at one price + cached `totalQty` for O(1) depth
-- [ ] `OrderBook` — bid/ask price ladders, best bid/ask, L2 depth snapshot
-- [ ] `OrderIndex` — primitive `long orderId -> Order` map, no boxing
-- [ ] Unit tests per class
+- [x] `Order` — mutable, pooled, intrusively doubly-linked (`prev`/`next`)
+- [x] `PriceLevel` — FIFO queue at one price + cached `totalQty` for O(1) depth
+- [x] `OrderBook` — bid/ask price ladders, best bid/ask, L2 depth snapshot
+- [x] `OrderIndex` — primitive `long orderId -> Order` map, no boxing
+- [x] Unit tests per class — 48 green in `engine-core`
 
-Start with `TreeMap<Long, PriceLevel>` for the ladder. Swap it for a
-primitive-keyed sorted structure only once a benchmark says it is the
-bottleneck — correct first, fast second.
+Ladders are `TreeMap<Long, PriceLevel>` as planned. This boxes a `Long` key
+per lookup; the swap to a primitive-keyed sorted structure waits on a phase 4
+benchmark saying it is the bottleneck — correct first, fast second.
 
 ## Phase 2 — Matching
 
