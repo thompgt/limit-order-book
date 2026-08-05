@@ -29,16 +29,32 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
  * order that was there first set the terms; a buyer willing to pay 105 who
  * finds an offer at 103 pays 103 and keeps the improvement.
  *
- * <h2>Scope</h2>
+ * <h2>Order types and time-in-force</h2>
  *
- * Phase 2 handles limit orders that rest ({@link TimeInForce#DAY}). IOC, FOK,
- * market orders, cancel and modify are phase 3 — until then they are rejected
- * with {@link RejectReason#UNSUPPORTED_TIME_IN_FORCE} rather than quietly
- * treated as something they are not.
+ * A market order is a limit order priced at {@link Side#marketPrice()}, so it
+ * crosses everything and the matching loop needs no special case for it. It
+ * never rests — there is no price to rest at — so any remainder is cancelled.
+ *
+ * <p>{@link TimeInForce#IOC} kills its remainder the moment the sweep ends.
+ * {@link TimeInForce#FOK} is checked against
+ * {@link OrderBook#fillableQuantity} <em>before</em> it touches the book: a FOK
+ * that cannot fill in full must emit no trades at all, and the only reliable
+ * way to guarantee that is never to start.
+ *
+ * <h2>Cancel and modify</h2>
+ *
+ * Cancel is O(1): the id lookup is a primitive-keyed map, and the order carries
+ * its own queue links so unlinking it needs no scan. Modify follows the rules in
+ * {@code CLAUDE.md} — a price change or a quantity increase costs time
+ * priority, a pure quantity decrease keeps it — and a modify that ends up
+ * crossing the book trades like any other aggressive order.
  *
  * <p>Not thread-safe, deliberately. See invariant 4 in {@code CLAUDE.md}.
  */
 public final class MatchingEngine {
+
+    /** Reported when a result has no symbol, because no order was found. */
+    public static final int NO_SYMBOL = -1;
 
     private final ExecutionSink sink;
     private final OrderIndex index;
@@ -47,6 +63,8 @@ public final class MatchingEngine {
 
     /** Reused across calls; see the ownership note on {@link SubmitResult}. */
     private final SubmitResult result = new SubmitResult();
+
+    private final CancelResult cancelResult = new CancelResult();
 
     /** Arrival order — the "time" in price-time priority. */
     private long nextSequence;
@@ -111,8 +129,11 @@ public final class MatchingEngine {
         return pool;
     }
 
+    // ------------------------------------------------------------- submit
+
     /**
-     * Submits an order: match it against the book, then rest what is left.
+     * Submits a limit order: match it against the book, then rest, kill or
+     * fill what is left according to its time-in-force.
      *
      * @param orderId  client-supplied; must not collide with a live order
      * @param price    limit price in ticks
@@ -127,9 +148,36 @@ public final class MatchingEngine {
             long price,
             long quantity) {
 
+        return submitOrder(orderId, symbolId, side, timeInForce, price, quantity, true);
+    }
+
+    /**
+     * Submits a market order: take whatever the book will give, at whatever
+     * price it asks, and cancel anything left over.
+     *
+     * <p>The time-in-force only decides whether a partial fill is acceptable.
+     * {@link TimeInForce#DAY} and {@link TimeInForce#IOC} behave identically
+     * here, since a market order cannot rest either way; {@link TimeInForce#FOK}
+     * demands the whole quantity or nothing.
+     */
+    public SubmitResult submitMarket(
+            long orderId, int symbolId, Side side, TimeInForce timeInForce, long quantity) {
+        return submitOrder(
+                orderId, symbolId, side, timeInForce, side.marketPrice(), quantity, false);
+    }
+
+    private SubmitResult submitOrder(
+            long orderId,
+            int symbolId,
+            Side side,
+            TimeInForce timeInForce,
+            long price,
+            long quantity,
+            boolean limitOrder) {
+
         result.reset(orderId, symbolId);
 
-        RejectReason reason = validate(orderId, symbolId, timeInForce, quantity);
+        RejectReason reason = validate(orderId, symbolId, side, price, quantity, limitOrder);
         if (reason != null) {
             sink.rejected(orderId, symbolId, reason);
             return result.rejected(reason);
@@ -141,6 +189,13 @@ public final class MatchingEngine {
                 .reset(orderId, symbolId, side, timeInForce, price, quantity, sequence);
         sink.accepted(order);
 
+        if (timeInForce == TimeInForce.FOK
+                && book.fillableQuantity(side, price, quantity) < quantity) {
+            // Killed before a single trade is emitted. Checking first is the
+            // whole design: there is no partial fill to unwind afterwards.
+            return kill(order, CancelReason.FILL_OR_KILL, sequence);
+        }
+
         match(book, order);
 
         if (order.remainingQuantity == 0) {
@@ -148,6 +203,10 @@ public final class MatchingEngine {
             result.complete(OrderStatus.FILLED, 0L, sequence);
             pool.release(order);
             return result;
+        }
+
+        if (!timeInForce.restsOnBook() || order.isMarket()) {
+            return kill(order, CancelReason.IMMEDIATE_OR_CANCEL, sequence);
         }
 
         index.put(order);
@@ -160,8 +219,25 @@ public final class MatchingEngine {
         return result;
     }
 
+    /**
+     * Retires an order that will not rest. The cancel event fires while the
+     * order still carries the quantity being killed, and the order goes back to
+     * the pool only once every consumer has seen it.
+     */
+    private SubmitResult kill(Order order, CancelReason reason, long sequence) {
+        sink.canceled(order, reason);
+        result.complete(OrderStatus.CANCELED, 0L, sequence);
+        pool.release(order);
+        return result;
+    }
+
     private RejectReason validate(
-            long orderId, int symbolId, TimeInForce timeInForce, long quantity) {
+            long orderId,
+            int symbolId,
+            Side side,
+            long price,
+            long quantity,
+            boolean limitOrder) {
         if (quantity <= 0) {
             return RejectReason.NON_POSITIVE_QUANTITY;
         }
@@ -171,11 +247,151 @@ public final class MatchingEngine {
         if (index.contains(orderId)) {
             return RejectReason.DUPLICATE_ORDER_ID;
         }
-        if (timeInForce != TimeInForce.DAY) {
-            return RejectReason.UNSUPPORTED_TIME_IN_FORCE;
+        if (limitOrder && price == side.marketPrice()) {
+            // The sentinel is reserved. Refusing keeps the encoding honest:
+            // otherwise a limit at Long.MAX_VALUE would silently sweep the book.
+            return RejectReason.RESERVED_PRICE;
         }
         return null;
     }
+
+    // ------------------------------------------------------------- cancel
+
+    /**
+     * Removes a resting order from the book. O(1): the index finds it without
+     * boxing and the order's own links unlink it without a queue scan.
+     *
+     * <p>Only open quantity is cancelled. Anything the order already traded is
+     * done and cannot be taken back, which is why cancelling a partially filled
+     * order reports only what was left.
+     *
+     * @return the reused result object, valid until the next call
+     */
+    public CancelResult cancel(long orderId) {
+        cancelResult.reset(orderId);
+
+        Order order = index.get(orderId);
+        if (order == null) {
+            sink.rejected(orderId, NO_SYMBOL, RejectReason.UNKNOWN_ORDER_ID);
+            return cancelResult.rejected(RejectReason.UNKNOWN_ORDER_ID);
+        }
+
+        int symbolId = order.symbolId;
+        long canceledQuantity = order.remainingQuantity;
+
+        books.get(symbolId).remove(order);
+        index.remove(orderId);
+        sink.canceled(order, CancelReason.USER);
+        pool.release(order);
+
+        return cancelResult.canceled(symbolId, canceledQuantity);
+    }
+
+    // ------------------------------------------------------------- modify
+
+    /**
+     * Changes a resting order's price, its quantity, or both.
+     *
+     * <p>Time priority follows the rules in {@code CLAUDE.md}, and they are the
+     * point of this method:
+     *
+     * <ul>
+     *   <li>price changed, either direction — priority <strong>lost</strong>,
+     *       re-queued at the back of the new level with a fresh sequence;
+     *   <li>quantity increased — priority <strong>lost</strong>, re-queued at
+     *       the back of the current level;
+     *   <li>quantity decreased only — priority <strong>kept</strong>, the order
+     *       does not move.
+     * </ul>
+     *
+     * The asymmetry is not arbitrary: asking for more than you queued for is a
+     * new request and has to go to the back, but giving some of it up takes
+     * nothing from anyone behind you, so there is no reason to charge for it.
+     *
+     * <p>A modify whose new price crosses the book trades immediately, exactly
+     * like a fresh aggressive order — which is why this returns a
+     * {@link SubmitResult}.
+     *
+     * @param newQuantity the new <em>total</em> order quantity, as originally
+     *                    submitted — not the remainder. Must exceed what the
+     *                    order has already filled.
+     */
+    public SubmitResult modify(long orderId, long newPrice, long newQuantity) {
+        Order order = index.get(orderId);
+        result.reset(orderId, order == null ? NO_SYMBOL : order.symbolId);
+
+        RejectReason reason = validateModify(order, newPrice, newQuantity);
+        if (reason != null) {
+            sink.rejected(orderId, result.symbolId(), reason);
+            return result.rejected(reason);
+        }
+
+        long previousPrice = order.price;
+        long previousQuantity = order.quantity;
+        long newRemaining = newQuantity - order.filledQuantity();
+        boolean priorityLost = newPrice != previousPrice || newRemaining > order.remainingQuantity;
+
+        if (!priorityLost) {
+            // A pure decrease: shrink it where it stands. Going through the book
+            // keeps the level's cached depth total in step, and the order cannot
+            // hit zero here because newQuantity is validated above the fill.
+            books.get(order.symbolId).reduce(order, order.remainingQuantity - newRemaining);
+            order.quantity = newQuantity;
+            sink.replaced(order, previousPrice, previousQuantity, false);
+            result.complete(
+                    order.filledQuantity() > 0 ? OrderStatus.PARTIALLY_FILLED : OrderStatus.RESTING,
+                    order.remainingQuantity,
+                    order.sequence);
+            return result;
+        }
+
+        OrderBook book = books.get(order.symbolId);
+        book.remove(order);
+
+        long sequence = ++nextSequence;
+        order.price = newPrice;
+        order.quantity = newQuantity;
+        order.remainingQuantity = newRemaining;
+        order.sequence = sequence;
+        sink.replaced(order, previousPrice, previousQuantity, true);
+
+        match(book, order);
+
+        if (order.remainingQuantity == 0) {
+            sink.filled(order);
+            index.remove(orderId);
+            result.complete(OrderStatus.FILLED, 0L, sequence);
+            pool.release(order);
+            return result;
+        }
+
+        // Still in the index throughout — the id never stopped being live.
+        book.add(order);
+        sink.rested(order);
+        result.complete(
+                order.filledQuantity() > 0 ? OrderStatus.PARTIALLY_FILLED : OrderStatus.RESTING,
+                order.remainingQuantity,
+                sequence);
+        return result;
+    }
+
+    private RejectReason validateModify(Order order, long newPrice, long newQuantity) {
+        if (order == null) {
+            return RejectReason.UNKNOWN_ORDER_ID;
+        }
+        if (newQuantity <= 0) {
+            return RejectReason.NON_POSITIVE_QUANTITY;
+        }
+        if (newPrice == order.side.marketPrice()) {
+            return RejectReason.RESERVED_PRICE;
+        }
+        if (newQuantity <= order.filledQuantity()) {
+            return RejectReason.QUANTITY_BELOW_FILLED;
+        }
+        return null;
+    }
+
+    // -------------------------------------------------------------- match
 
     /**
      * Sweeps the opposite side while the incoming order still has quantity and

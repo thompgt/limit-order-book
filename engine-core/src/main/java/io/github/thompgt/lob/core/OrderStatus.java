@@ -22,8 +22,14 @@ public enum OrderStatus {
     FILLED,
 
     /**
-     * The unfilled remainder was killed rather than rested — an IOC with
-     * quantity left over, or an FOK that could not fill in full. Phase 3.
+     * The order left the book without its full quantity trading — cancelled by
+     * the client, an IOC or market order with quantity left over, or an FOK
+     * that could not fill in full.
+     *
+     * <p>This says nothing about whether it traded first. An IOC that filled
+     * half and killed the rest is {@code CANCELED} with a non-zero
+     * {@link SubmitResult#filledQuantity()}; read the quantities, not the
+     * status, to know what happened.
      */
     CANCELED
 }

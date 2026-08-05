@@ -64,4 +64,29 @@ public interface ExecutionSink {
 
     /** An order's remainder is now resting on the book at its limit price. */
     default void rested(Order order) {}
+
+    /**
+     * An order's open quantity has gone away without trading. Fires once per
+     * order, after any trades it did manage, and after that the id is free
+     * again.
+     *
+     * @param order  still carries the quantity that was killed in
+     *               {@code remainingQuantity}; it is zeroed only afterwards
+     * @param reason who killed it — the client, a time-in-force, or the
+     *               absence of a price to rest at
+     */
+    default void canceled(Order order, CancelReason reason) {}
+
+    /**
+     * A resting order was modified in place. The order carries its new price,
+     * quantity and sequence by the time this fires; the previous values are
+     * passed alongside so a consumer can diff them without having kept state.
+     *
+     * <p>{@code priorityLost} is the interesting bit: {@code false} means the
+     * order held its position in the queue (a pure quantity decrease),
+     * {@code true} means it went to the back with a fresh sequence number. Any
+     * trades the replacement causes follow this event, not precede it.
+     */
+    default void replaced(
+            Order order, long previousPrice, long previousQuantity, boolean priorityLost) {}
 }

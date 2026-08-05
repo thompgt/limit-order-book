@@ -21,9 +21,22 @@ public enum RejectReason {
     DUPLICATE_ORDER_ID,
 
     /**
-     * The time-in-force is understood but not yet implemented. IOC, FOK and
-     * market orders land in phase 3; until then they are refused loudly rather
-     * than silently treated as something else.
+     * A cancel or modify named an order the engine does not have. Either the id
+     * was never used, or the order has already left the book — filled, or
+     * cancelled by an earlier message.
      */
-    UNSUPPORTED_TIME_IN_FORCE
+    UNKNOWN_ORDER_ID,
+
+    /**
+     * A limit order was priced at one of the {@link Side#marketPrice()}
+     * sentinels. Those two values encode "market", so a limit may not use them.
+     */
+    RESERVED_PRICE,
+
+    /**
+     * A modify asked for a total quantity at or below what the order has
+     * already traded. There is nothing left to leave open, and silently turning
+     * it into a cancel would be a different instruction than the one sent.
+     */
+    QUANTITY_BELOW_FILLED
 }

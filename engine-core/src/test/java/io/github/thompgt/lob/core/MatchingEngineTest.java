@@ -451,19 +451,24 @@ class MatchingEngineTest {
     }
 
     @Test
-    void immediateOrCancelIsRejectedUntilPhaseThree() {
+    void aLimitPricedAtTheMarketSentinelIsRefused() {
+        // Long.MAX_VALUE encodes "market" for a buy. Accepting it as a limit
+        // would let a client sweep the entire book while appearing to name a
+        // price, so the two encodings are kept apart.
         SubmitResult result =
-                engine.submit(1L, SYMBOL, Side.BUY, TimeInForce.IOC, 100L, 10L);
+                engine.submit(1L, SYMBOL, Side.BUY, TimeInForce.DAY, Side.BUY.marketPrice(), 10L);
 
-        assertThat(result.rejectReason()).isEqualTo(RejectReason.UNSUPPORTED_TIME_IN_FORCE);
+        assertThat(result.rejectReason()).isEqualTo(RejectReason.RESERVED_PRICE);
     }
 
     @Test
-    void fillOrKillIsRejectedUntilPhaseThree() {
+    void theOppositeSidesSentinelIsAnOrdinaryLimitPrice() {
+        // Only a side's own sentinel is reserved. Long.MIN_VALUE as a buy limit
+        // is merely a bid nobody will ever hit — absurd, but well defined.
         SubmitResult result =
-                engine.submit(1L, SYMBOL, Side.BUY, TimeInForce.FOK, 100L, 10L);
+                engine.submit(1L, SYMBOL, Side.BUY, TimeInForce.DAY, Side.SELL.marketPrice(), 10L);
 
-        assertThat(result.rejectReason()).isEqualTo(RejectReason.UNSUPPORTED_TIME_IN_FORCE);
+        assertThat(result.status()).isEqualTo(OrderStatus.RESTING);
     }
 
     @Test

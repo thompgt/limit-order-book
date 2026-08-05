@@ -140,6 +140,17 @@ public final class Order {
         return level != null;
     }
 
+    /**
+     * True if this is a market order — one carrying its side's
+     * {@link Side#marketPrice() sentinel} rather than a real limit.
+     *
+     * <p>A market order can never rest: there is no price to rest at, so any
+     * remainder left after the sweep is cancelled regardless of time-in-force.
+     */
+    public boolean isMarket() {
+        return price == side.marketPrice();
+    }
+
     @Override
     public String toString() {
         // Diagnostics only — never called on the hot path.

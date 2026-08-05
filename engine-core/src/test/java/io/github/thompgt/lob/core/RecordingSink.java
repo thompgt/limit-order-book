@@ -31,7 +31,20 @@ final class RecordingSink implements ExecutionSink {
             Side restingSide,
             long restingSequence) {}
 
+    /** One modify, before and after, captured while the callback was running. */
+    record Replacement(
+            long orderId,
+            long previousPrice,
+            long previousQuantity,
+            long newPrice,
+            long newQuantity,
+            long newSequence,
+            boolean priorityLost) {}
+
     private final List<Trade> trades = new ArrayList<>();
+    private final List<Long> canceled = new ArrayList<>();
+    private final List<Replacement> replacements = new ArrayList<>();
+    private final Map<Long, CancelReason> cancelReasons = new HashMap<>();
     private final List<String> events = new ArrayList<>();
     private final List<Long> accepted = new ArrayList<>();
     private final List<Long> rested = new ArrayList<>();
@@ -94,6 +107,31 @@ final class RecordingSink implements ExecutionSink {
                 + "@" + order.price());
     }
 
+    @Override
+    public void canceled(Order order, CancelReason reason) {
+        canceled.add(order.orderId());
+        cancelReasons.put(order.orderId(), reason);
+        events.add("canceled:" + order.orderId() + ":" + order.remainingQuantity()
+                + ":" + reason);
+    }
+
+    @Override
+    public void replaced(
+            Order order, long previousPrice, long previousQuantity, boolean priorityLost) {
+        replacements.add(new Replacement(
+                order.orderId(),
+                previousPrice,
+                previousQuantity,
+                order.price(),
+                order.quantity(),
+                order.sequence(),
+                priorityLost));
+        events.add("replaced:" + order.orderId()
+                + ":" + previousQuantity + "@" + previousPrice
+                + "->" + order.quantity() + "@" + order.price()
+                + (priorityLost ? ":lost" : ":kept"));
+    }
+
     List<Trade> trades() {
         return trades;
     }
@@ -116,6 +154,22 @@ final class RecordingSink implements ExecutionSink {
 
     List<String> rejects() {
         return rejects;
+    }
+
+    List<Long> canceled() {
+        return canceled;
+    }
+
+    CancelReason cancelReason(long orderId) {
+        return cancelReasons.get(orderId);
+    }
+
+    List<Replacement> replacements() {
+        return replacements;
+    }
+
+    Replacement lastReplacement() {
+        return replacements.get(replacements.size() - 1);
     }
 
     long filledQuantity(long orderId) {
@@ -150,6 +204,9 @@ final class RecordingSink implements ExecutionSink {
         rested.clear();
         filled.clear();
         rejects.clear();
+        canceled.clear();
+        cancelReasons.clear();
+        replacements.clear();
         filledByOrder.clear();
         sideByOrder.clear();
     }

@@ -152,6 +152,37 @@ public final class OrderBook {
         return level == null ? 0L : level.totalQuantity();
     }
 
+    /**
+     * How much an aggressive order could trade right now, without trading it.
+     *
+     * <p>This is what makes fill-or-kill possible: FOK has to know the answer
+     * <em>before</em> touching the book, because a partial fill it then had to
+     * unwind would already have been published to every consumer.
+     *
+     * <p>Walks the opposite ladder from the best price outwards, exactly as the
+     * matching loop would, and stops as soon as it has seen {@code cap} units —
+     * a deep book is not worth counting past the point the answer is decided.
+     *
+     * @param aggressorSide the side of the incoming order, not the resting one
+     * @param limitPrice    the incoming order's limit; use
+     *                      {@link Side#marketPrice()} for a market order
+     * @param cap           stop counting here
+     * @return reachable open quantity, never more than {@code cap}
+     */
+    public long fillableQuantity(Side aggressorSide, long limitPrice, long cap) {
+        long total = 0L;
+        for (PriceLevel level : ladderFor(aggressorSide.opposite()).values()) {
+            if (!aggressorSide.crosses(limitPrice, level.price())) {
+                break; // The ladder is sorted, so nothing further can cross either.
+            }
+            total += level.totalQuantity();
+            if (total >= cap) {
+                return cap;
+            }
+        }
+        return total;
+    }
+
     /** Number of distinct populated price levels on a side. */
     public int levelCount(Side side) {
         return ladderFor(side).size();
