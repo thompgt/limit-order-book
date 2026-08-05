@@ -13,8 +13,8 @@ Commits happen after each small unit inside a phase, not at the phase boundary.
 - [x] Root aggregator pom; Spring Boot BOM imported, not inherited
 - [x] `engine-core` / `engine-bench` / `engine-api` modules, build green
 - [x] `README.md` with an unfilled **Results** table
-- [ ] CI workflow
-- [ ] Public repo pushed
+- [x] CI workflow (green on GitHub Actions, JDK 21)
+- [x] Public repo pushed — https://github.com/thompgt/limit-order-book
 
 ## Phase 1 — Core data structures
 
