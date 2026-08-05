@@ -40,6 +40,21 @@ A modify that would cross the book is treated as a new aggressive order at the
 new price. These rules are pinned by tests named after the rule they enforce;
 do not change them without changing those tests deliberately.
 
+The quantity in a modify is the new **total** order quantity, as originally
+submitted — not the new remainder. So "increased" and "decreased" are measured
+against the total, and a modify to a total at or below what the order has
+already traded is rejected rather than quietly read as a cancel.
+
+### Market orders
+
+A market order is a limit order priced at `Side.marketPrice()` — `Long.MAX_VALUE`
+to buy, `Long.MIN_VALUE` to sell. That is not a trick to save a field: it means
+the matching loop has no market special case at all, since the sentinel crosses
+every resting price and the sweep already stops when the book runs out. A market
+order can never rest, so its time-in-force only decides whether a partial fill is
+acceptable. The two sentinels are reserved: a limit priced at its own side's
+sentinel is rejected.
+
 ---
 
 ## Tech stack

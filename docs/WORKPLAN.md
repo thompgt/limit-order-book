@@ -42,17 +42,34 @@ Both property groups were mutation-checked rather than trusted: filling
 newest-first instead of oldest-first, and dropping the limit-price check, each
 fail the suite. A property that cannot fail is decoration.
 
-IOC, FOK and market orders are rejected with `UNSUPPORTED_TIME_IN_FORCE` until
-phase 3 — refused loudly rather than silently treated as DAY.
+IOC, FOK and market orders were rejected with `UNSUPPORTED_TIME_IN_FORCE` at
+this point — refused loudly rather than silently treated as DAY — until phase 3
+implemented them.
 
-## Phase 3 — Cancel / modify / time-in-force
+## Phase 3 — Cancel / modify / time-in-force ✅
 
-- [ ] O(1) cancel by order id
-- [ ] Modify with the exact priority rules in `CLAUDE.md`, each pinned by a
+- [x] O(1) cancel by order id
+- [x] Modify with the exact priority rules in `CLAUDE.md`, each pinned by a
       test named after the rule
-- [ ] Market orders
-- [ ] IOC — take available, cancel remainder
-- [ ] FOK — check fillability before touching the book, then all-or-nothing
+- [x] Market orders
+- [x] IOC — take available, cancel remainder
+- [x] FOK — check fillability before touching the book, then all-or-nothing
+- [x] Tests — 195 green in `engine-core`, 22 of them properties
+
+A market order is a limit priced at `Side.marketPrice()`, so the matching loop
+needs no market special case: the sentinel crosses everything and the sweep
+stops when the book runs out. A *limit* at its own side's sentinel is rejected
+with `RESERVED_PRICE` so the encoding stays unambiguous.
+
+FOK asks `OrderBook.fillableQuantity` before touching the book. A partial fill
+that then had to be unwound would already have been published to every
+consumer, so the only reliable way to emit nothing is never to start.
+
+`LifecycleProperties` runs the same mutation check phase 2 used, over mixed
+streams of every command type. Dropping the index removal from cancel fails all
+11 properties; skipping the unlink before a modify re-adds fails all 11;
+shrinking an order without adjusting its level's cached total fails exactly the
+one property written for it.
 
 ## Phase 4 — Benchmarks
 
