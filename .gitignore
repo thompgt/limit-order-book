@@ -12,6 +12,10 @@ jmh-result.*
 benchmarks/results/*.json
 benchmarks/results/*.txt
 
+# jqwik's cache of previously failing samples. Local scratch: committing it
+# makes CI replay whatever last failed on someone's laptop.
+.jqwik-database
+
 # IDE
 .idea/
 *.iml
