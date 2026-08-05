@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build and test
+        run: ./mvnw -B verify
+
+      # Benchmarks are opt-in and not run here: CI runners are too noisy for
+      # tail-latency numbers to mean anything. This step only proves the
+      # harness still compiles and packages.
+      - name: Package benchmark harness
+        run: ./mvnw -B -pl engine-bench -am -Pbench package -DskipTests
