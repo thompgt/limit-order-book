@@ -1,0 +1,32 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+release.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Benchmark output
+*.hgrm
+jmh-result.*
+benchmarks/results/*.json
+benchmarks/results/*.txt
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / runtime
+*.log
+hs_err_pid*.log
+replay_pid*.log
