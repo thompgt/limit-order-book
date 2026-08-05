@@ -52,6 +52,34 @@
     </dependency>
   </dependencies>
 
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!--
+            JMH discovers benchmarks at build time with an annotation processor
+            that writes META-INF/BenchmarkList. Since JDK 23, javac no longer
+            runs processors it merely finds on the classpath, so this has to be
+            asked for by name. Without it everything compiles, the shaded jar
+            builds, and the run dies with "Unable to find the resource:
+            /META-INF/BenchmarkList" - a build that succeeds and produces
+            nothing measurable.
+          -->
+          <proc>full</proc>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.openjdk.jmh</groupId>
+              <artifactId>jmh-generator-annprocess</artifactId>
+              <version>${jmh.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
   <profiles>
     <!--
       -Pbench builds a self-contained benchmarks.jar and runs it during `verify`.
