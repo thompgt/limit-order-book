@@ -81,21 +81,41 @@ one property written for it.
 - [ ] README **Results** table filled from real runs, with commands and
       machine specs
 
-## Phase 5 — Spring API
+## Phase 5 — Spring API ✅
 
-- [ ] `POST /api/v1/orders`, `DELETE /api/v1/orders/{id}`,
+- [x] `POST /api/v1/orders`, `DELETE /api/v1/orders/{id}`,
       `PATCH /api/v1/orders/{id}`
-- [ ] `GET /api/v1/book/{symbol}` — L2 depth snapshot
-- [ ] WebSocket `/stream/{symbol}` — executions and depth updates
-- [ ] Single-consumer command queue keeping the engine single-threaded
-- [ ] Actuator health + Micrometer metrics
-- [ ] Architecture test: no framework type reachable from `engine-core`
+- [x] `GET /api/v1/book/{symbol}` — L2 depth snapshot, level count capped
+- [x] WebSocket `/stream/{symbol}` — executions, plus depth on a 250ms clock
+- [x] Single-consumer command queue keeping the engine single-threaded
+- [x] Actuator health + Micrometer gauges (`lob_*`) + Prometheus registry
+- [x] ArchUnit test: no framework type reachable from `engine-core`
+- [x] Tests — 40 green in `engine-api`
+
+Three decisions worth recording:
+
+**Results must be copied on the engine thread.** The engine returns reused
+objects — `SubmitResult` is overwritten by the next call, and a released `Order`
+is back in the pool. So a command function handed to `EngineDispatcher` must
+project to an immutable value *before it returns*. A function that returns an
+engine object is a race that surfaces as a rare wrong price, not as a crash.
+
+**Market data is dropped, not queued.** When the publisher falls behind, events
+are discarded and counted. Matching outranks the feed: the alternatives are
+blocking the engine on a socket or growing a queue until the process dies, and
+both trade a correct book for a complete feed. `lob_stream_dropped` makes it
+visible instead of silent.
+
+**Gauges, not timers.** A Micrometer timer on the command path would put
+measurement overhead inside the measured thing, and would suffer exactly the
+coordinated omission the benchmark harness exists to avoid — it can only record
+commands that got to run.
 
 ## Phase 6 — Polish
 
 - [ ] Docker image
 - [ ] Sample client / demo script
-- [ ] Book-state visualization
+- [x] Book-state visualization — one static page at `/`, no build step
 - [ ] Tuning notes: what actually moved the tail latency, with before/after
 
 ---
