@@ -1,8 +1,8 @@
 package io.github.thompgt.lob.core;
 
-import java.util.Comparator;
-import java.util.Map;
-import java.util.TreeMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectRBTreeMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectSortedMap;
+import it.unimi.dsi.fastutil.longs.LongComparators;
 
 /**
  * The book for one instrument: two price ladders of {@link PriceLevel}.
@@ -16,12 +16,33 @@ import java.util.TreeMap;
  * in the matching engine, which drives the book through {@link #add},
  * {@link #reduce} and {@link #remove}.
  *
- * <p>The ladders are {@link TreeMap}s for now. That boxes a {@code Long} key on
- * lookup, which will eventually show up on the hot path — the deliberate order
- * of work is to get the semantics right and let a benchmark, not a hunch, say
- * when to replace this with a primitive-keyed structure. Emptied levels are
- * recycled through a small free list so steady-state trading around a stable
- * price does not churn level objects.
+ * <p>The ladders are primitive-keyed red-black trees. They began as
+ * {@link java.util.TreeMap}s, on the principle that a benchmark rather than a
+ * hunch should say when to replace them — and in phase 4 the benchmark did.
+ * {@code -prof gc} showed 24–36 B/op on every path that touched a ladder,
+ * against 0.7 B/op on the one path that does not (an in-place quantity
+ * decrease, which never looks a price up). Two causes, found in that order:
+ *
+ * <ul>
+ *   <li>{@code TreeMap<Long, PriceLevel>} boxed a {@code Long} per lookup, and
+ *       {@code firstEntry()} allocated a fresh immutable entry every call — so
+ *       simply <em>asking for the best price</em> allocated. fastutil's
+ *       primitive map removed the boxing and took the ladder paths to
+ *       ~17–24 B/op.</li>
+ *   <li>What remained was tree <em>node</em> churn: resting the first order at
+ *       a new price allocates an entry, and cancelling the last order at that
+ *       price throws it away. This is real, not measurement error, and it is
+ *       proportional to how often trading opens and closes price levels rather
+ *       than to order rate. Removing it means giving up the tree — an
+ *       array-indexed ladder over a bounded price band — which is a larger
+ *       change than the numbers currently justify.</li>
+ * </ul>
+ *
+ * <p>Asking for the best price no longer costs anything either way: it is a
+ * maintained field, see {@link #bestBidLevel}.
+ *
+ * <p>Emptied levels are recycled through a small free list so steady-state
+ * trading around a stable price does not churn level objects.
  *
  * <p>Not thread-safe; the engine is single-threaded by design.
  */
@@ -38,10 +59,26 @@ public final class OrderBook {
     private final int symbolId;
 
     /** Highest price first: the best bid is the first entry. */
-    private final TreeMap<Long, PriceLevel> bids = new TreeMap<>(Comparator.reverseOrder());
+    private final Long2ObjectSortedMap<PriceLevel> bids =
+            new Long2ObjectRBTreeMap<>(LongComparators.OPPOSITE_COMPARATOR);
 
     /** Lowest price first: the best ask is the first entry. */
-    private final TreeMap<Long, PriceLevel> asks = new TreeMap<>();
+    private final Long2ObjectSortedMap<PriceLevel> asks = new Long2ObjectRBTreeMap<>();
+
+    /**
+     * The front of each ladder, held directly.
+     *
+     * <p>{@link #bestLevel} is the single most-called method in the engine — the
+     * match loop asks for it on every pass — and no tree offers a
+     * both-cheap-and-allocation-free way to answer it: the JDK's
+     * {@code firstEntry()} allocates, and reaching the same answer without it
+     * costs a {@code firstLongKey()} descent plus a {@code get()} descent. So
+     * the answer is maintained instead of computed. Both fields are null exactly
+     * when their ladder is empty; that correspondence is what
+     * {@link #add} and {@link #discardIfEmpty} exist to preserve.
+     */
+    private PriceLevel bestBidLevel;
+    private PriceLevel bestAskLevel;
 
     private final PriceLevel[] levelPool = new PriceLevel[LEVEL_POOL_CAPACITY];
     private int pooledLevels;
@@ -62,11 +99,12 @@ public final class OrderBook {
      * has already matched away whatever it could.
      */
     public void add(Order order) {
-        TreeMap<Long, PriceLevel> ladder = ladderFor(order.side);
+        Long2ObjectSortedMap<PriceLevel> ladder = ladderFor(order.side);
         PriceLevel level = ladder.get(order.price);
         if (level == null) {
             level = acquireLevel(order.price);
             ladder.put(order.price, level);
+            promoteIfBest(order.side, level);
         }
         level.add(order);
     }
@@ -104,10 +142,13 @@ public final class OrderBook {
         }
     }
 
-    /** The level an aggressive order would hit first on the given side. */
+    /**
+     * The level an aggressive order would hit first on the given side, or
+     * {@code null} if that side is empty. A field read — no tree walk, no
+     * allocation.
+     */
     public PriceLevel bestLevel(Side side) {
-        Map.Entry<Long, PriceLevel> best = ladderFor(side).firstEntry();
-        return best == null ? null : best.getValue();
+        return side == Side.BUY ? bestBidLevel : bestAskLevel;
     }
 
     /** @return the highest bid price, or {@link #NO_BID} if there is no bid */
@@ -208,7 +249,7 @@ public final class OrderBook {
         }
     }
 
-    private TreeMap<Long, PriceLevel> ladderFor(Side side) {
+    private Long2ObjectSortedMap<PriceLevel> ladderFor(Side side) {
         return side == Side.BUY ? bids : asks;
     }
 
@@ -218,9 +259,32 @@ public final class OrderBook {
      * behind it.
      */
     private void discardIfEmpty(Side side, PriceLevel level) {
-        if (level.isEmpty()) {
-            ladderFor(side).remove(level.price());
-            releaseLevel(level);
+        if (!level.isEmpty()) {
+            return;
+        }
+        Long2ObjectSortedMap<PriceLevel> ladder = ladderFor(side);
+        ladder.remove(level.price());
+        if (bestLevel(side) == level) {
+            // Only the front of the ladder forces a recompute, and only when it
+            // is the level that just went away. Every other cancel is untouched.
+            setBest(side, ladder.isEmpty() ? null : ladder.get(ladder.firstLongKey()));
+        }
+        releaseLevel(level);
+    }
+
+    /** Makes a newly created level the front of its ladder if it belongs there. */
+    private void promoteIfBest(Side side, PriceLevel level) {
+        PriceLevel current = bestLevel(side);
+        if (current == null || side.isBetterPrice(level.price(), current.price())) {
+            setBest(side, level);
+        }
+    }
+
+    private void setBest(Side side, PriceLevel level) {
+        if (side == Side.BUY) {
+            bestBidLevel = level;
+        } else {
+            bestAskLevel = level;
         }
     }
 

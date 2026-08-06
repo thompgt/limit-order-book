@@ -24,6 +24,18 @@ public enum Side {
     }
 
     /**
+     * Whether {@code price} sits strictly closer to the front of this side's
+     * ladder than {@code other} — a higher bid, or a lower ask.
+     *
+     * <p>Distinct from {@link #crosses}, which is about two <em>opposing</em>
+     * orders meeting. This one compares two prices on the same side, which is
+     * what deciding "is this the new best?" needs.
+     */
+    public boolean isBetterPrice(long price, long other) {
+        return this == BUY ? price > other : price < other;
+    }
+
+    /**
      * The price a market order on this side carries: the most aggressive value
      * there is, so {@link #crosses} says yes to every resting order.
      *

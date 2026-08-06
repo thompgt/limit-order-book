@@ -244,4 +244,82 @@ class OrderBookTest {
         assertThat(book.levelCount(Side.BUY)).isEqualTo(1);
         assertThat(book.bestLevel(Side.BUY).orderCount()).isEqualTo(1);
     }
+
+    // The best level of each side is a maintained field rather than a tree
+    // lookup, so these pin the cases where maintaining it could go wrong.
+
+    @Test
+    void aBetterPriceArrivingBecomesTheNewBestOnBothSides() {
+        rest(Side.BUY, 100L, 10L);
+        rest(Side.SELL, 110L, 10L);
+
+        rest(Side.BUY, 101L, 5L);
+        rest(Side.SELL, 109L, 5L);
+
+        assertThat(book.bestBid()).isEqualTo(101L);
+        assertThat(book.bestAsk()).isEqualTo(109L);
+    }
+
+    @Test
+    void aWorsePriceArrivingLeavesTheBestAlone() {
+        rest(Side.BUY, 100L, 10L);
+        rest(Side.SELL, 110L, 10L);
+
+        rest(Side.BUY, 98L, 5L);
+        rest(Side.SELL, 112L, 5L);
+
+        assertThat(book.bestBid()).isEqualTo(100L);
+        assertThat(book.bestAsk()).isEqualTo(110L);
+    }
+
+    @Test
+    void emptyingALevelBehindTheBestDoesNotChangeTheBest() {
+        rest(Side.BUY, 100L, 10L);
+        Order behind = rest(Side.BUY, 99L, 10L);
+
+        book.remove(behind);
+
+        assertThat(book.bestBid()).isEqualTo(100L);
+        assertThat(book.levelCount(Side.BUY)).isEqualTo(1);
+    }
+
+    @Test
+    void emptyingTheBookOneLevelAtATimeWalksTheBestBackDown() {
+        Order at102 = rest(Side.BUY, 102L, 10L);
+        Order at101 = rest(Side.BUY, 101L, 10L);
+        Order at100 = rest(Side.BUY, 100L, 10L);
+
+        assertThat(book.bestBid()).isEqualTo(102L);
+        book.remove(at102);
+        assertThat(book.bestBid()).isEqualTo(101L);
+        book.remove(at101);
+        assertThat(book.bestBid()).isEqualTo(100L);
+        book.remove(at100);
+        assertThat(book.bestBid()).isEqualTo(OrderBook.NO_BID);
+        assertThat(book.bestLevel(Side.BUY)).isNull();
+    }
+
+    @Test
+    void aFullFillOfTheBestLevelPromotesTheNextPrice() {
+        Order best = rest(Side.SELL, 110L, 10L);
+        rest(Side.SELL, 111L, 10L);
+
+        book.reduce(best, 10L);
+
+        assertThat(book.bestAsk()).isEqualTo(111L);
+        assertThat(book.bestLevel(Side.SELL).totalQuantity()).isEqualTo(10L);
+    }
+
+    @Test
+    void aPriceThatEmptiesAndComesBackIsTheBestAgain() {
+        Order only = rest(Side.SELL, 110L, 10L);
+        rest(Side.SELL, 111L, 10L);
+        book.remove(only);
+        assertThat(book.bestAsk()).isEqualTo(111L);
+
+        rest(Side.SELL, 110L, 7L);
+
+        assertThat(book.bestAsk()).isEqualTo(110L);
+        assertThat(book.bestLevel(Side.SELL).totalQuantity()).isEqualTo(7L);
+    }
 }
