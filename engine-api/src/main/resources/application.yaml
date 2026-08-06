@@ -5,6 +5,16 @@ spring:
 server:
   port: 8080
 
+lob:
+  # Books opened at startup. Orders for anything else are rejected.
+  symbols: [AAPL, MSFT, NVDA]
+  # Bounded on purpose: a full queue sheds load instead of turning a
+  # throughput problem into a latency problem and then an OOM.
+  queue-capacity: 8192
+  command-timeout-ms: 1000
+  max-depth-levels: 20
+  order-pool-capacity: 65536
+
 management:
   endpoints:
     web:
