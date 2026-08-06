@@ -88,6 +88,13 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-compiler-plugin</artifactId>
           <version>${compiler.plugin.version}</version>
+          <configuration>
+            <!-- Keep parameter names in the class files. spring-boot-starter-parent
+                 would set this, but this build has its own parent, and without it
+                 Spring cannot bind @PathVariable or constructor-bound properties
+                 unless every single one is named twice. -->
+            <parameters>true</parameters>
+          </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
