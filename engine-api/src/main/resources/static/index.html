@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>limit-order-book</title>
+<!--
+  Deliberately one file, no build step, no dependencies.
+
+  Adding an npm toolchain to a Maven-only repository is a real cost - a second
+  lockfile, a second CI cache, a second thing that breaks on a Tuesday - and it
+  buys nothing here. This page renders a depth ladder and a tape. Both are lists.
+-->
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #121722;
+    --line: #1e2635;
+    --text: #d6deeb;
+    --muted: #6b7a99;
+    --bid: #26a69a;
+    --ask: #ef5350;
+    --accent: #7aa2f7;
+    --warn: #e0af68;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.5 ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  h1 span { color: var(--muted); font-weight: 400; }
+
+  select, input, button {
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 5px 8px;
+  }
+
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .dot.live { background: var(--bid); }
+  .dot.down { background: var(--ask); }
+
+  main {
+    display: grid;
+    grid-template-columns: minmax(320px, 1fr) minmax(280px, 380px) minmax(300px, 1fr);
+    gap: 16px;
+    padding: 16px 20px;
+    align-items: start;
+  }
+
+  @media (max-width: 980px) {
+    main { grid-template-columns: 1fr; }
+  }
+
+  section {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  section > h2 {
+    margin: 0;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--line);
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    padding: 6px 12px;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    text-align: right;
+  }
+  th:first-child { text-align: left; }
+  td {
+    padding: 3px 12px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    position: relative;
+  }
+  td:first-child { text-align: left; }
+
+  /* The depth bar is a background layer on the price cell, so the number
+     stays readable at any depth rather than being painted over. */
+  .bar {
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    right: 0;
+    opacity: 0.18;
+    pointer-events: none;
+  }
+  .bids .bar { background: var(--bid); }
+  .asks .bar { background: var(--ask); }
+  .bids .px { color: var(--bid); }
+  .asks .px { color: var(--ask); }
+
+  .spread {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    background: rgba(122, 162, 247, 0.06);
+    color: var(--muted);
+  }
+  .spread b { color: var(--text); font-weight: 600; }
+
+  form { padding: 12px; display: grid; gap: 8px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  label { display: grid; gap: 4px; font-size: 10px; text-transform: uppercase;
+          letter-spacing: 0.06em; color: var(--muted); }
+  .side-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .side-buttons button.on[data-side="BUY"] { background: var(--bid); color: #04140f; border-color: var(--bid); }
+  .side-buttons button.on[data-side="SELL"] { background: var(--ask); color: #1a0505; border-color: var(--ask); }
+  button.submit { padding: 8px; font-weight: 600; }
+
+  .feed { max-height: 460px; overflow-y: auto; }
+  .feed td { padding: 2px 12px; }
+  .feed .type { color: var(--muted); }
+  .feed .trade .type { color: var(--accent); }
+  .feed .rejected .type, .feed .canceled .type { color: var(--warn); }
+
+  .empty { padding: 16px 12px; color: var(--muted); }
+  .working { padding: 8px 12px; color: var(--warn); min-height: 32px; }
+  .working.err { color: var(--ask); }
+  .working.ok { color: var(--bid); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>limit-order-book <span>/ matching engine</span></h1>
+  <label style="display:flex;gap:8px;align-items:center;text-transform:none;font-size:13px;color:var(--text)">
+    <select id="symbol"></select>
+  </label>
+  <div class="status">
+    <span class="dot" id="dot"></span>
+    <span id="conn">connecting</span>
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>Depth</h2>
+    <table class="asks">
+      <thead><tr><th>Price</th><th>Quantity</th><th>Orders</th></tr></thead>
+      <tbody id="asks"></tbody>
+    </table>
+    <div class="spread">
+      <span>spread <b id="spread">—</b></span>
+      <span>bid <b id="bestBid">—</b> / ask <b id="bestAsk">—</b></span>
+    </div>
+    <table class="bids">
+      <tbody id="bids"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>New order</h2>
+    <form id="entry">
+      <div class="side-buttons">
+        <button type="button" data-side="BUY" class="on">Buy</button>
+        <button type="button" data-side="SELL">Sell</button>
+      </div>
+      <div class="row">
+        <label>Type
+          <select id="type">
+            <option>LIMIT</option>
+            <option>MARKET</option>
+          </select>
+        </label>
+        <label>Time in force
+          <select id="tif">
+            <option>DAY</option>
+            <option>IOC</option>
+            <option>FOK</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label>Price (ticks)
+          <input id="price" type="number" step="1" value="100000">
+        </label>
+        <label>Quantity
+          <input id="quantity" type="number" step="1" min="1" value="10">
+        </label>
+      </div>
+      <button class="submit" type="submit">Send</button>
+      <div class="working" id="result"></div>
+    </form>
+    <h2>Working orders</h2>
+    <table>
+      <tbody id="working"></tbody>
+    </table>
+    <div class="empty" id="workingEmpty">nothing resting</div>
+  </section>
+
+  <section>
+    <h2>Tape</h2>
+    <div class="feed">
+      <table><tbody id="feed"></tbody></table>
+    </div>
+    <div class="empty" id="feedEmpty">waiting for events</div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// State. Small enough that a framework would be more machinery than the thing
+// it manages.
+// ---------------------------------------------------------------------------
+
+const state = {
+  symbol: null,
+  side: "BUY",
+  socket: null,
+  working: new Map(),   // orderId -> { side, price, remaining }
+  pending: new Set(),   // submitted here, not yet seen resting
+  feedRows: 0,
+};
+
+const MAX_FEED_ROWS = 200;
+const el = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+function renderDepth(depth) {
+  const peak = Math.max(
+    1,
+    ...depth.bids.map((l) => l.quantity),
+    ...depth.asks.map((l) => l.quantity));
+
+  // Asks read best-price-last so the two ladders meet at the spread, the way
+  // a trader expects to see them.
+  el("asks").innerHTML = depth.asks.slice().reverse().map((l) => level(l, peak)).join("");
+  el("bids").innerHTML = depth.bids.map((l) => level(l, peak)).join("");
+
+  el("bestBid").textContent = depth.bestBid ?? "—";
+  el("bestAsk").textContent = depth.bestAsk ?? "—";
+  el("spread").textContent = depth.spread ?? "—";
+}
+
+function level(l, peak) {
+  const width = (l.quantity / peak) * 100;
+  return `<tr>
+    <td class="px">${l.price}<span class="bar" style="width:${width}%"></span></td>
+    <td>${l.quantity}</td>
+    <td>${l.orders}</td>
+  </tr>`;
+}
+
+function renderWorking() {
+  const rows = [...state.working.entries()];
+  el("workingEmpty").style.display = rows.length ? "none" : "";
+  el("working").innerHTML = rows.map(([id, o]) => `<tr>
+    <td style="color:var(--${o.side === "BUY" ? "bid" : "ask"})">${o.side}</td>
+    <td>${o.price}</td>
+    <td>${o.remaining}</td>
+    <td><button type="button" data-cancel="${id}">cancel</button></td>
+  </tr>`).join("");
+}
+
+function appendFeed(event) {
+  el("feedEmpty").style.display = "none";
+  const row = document.createElement("tr");
+  row.className = event.type;
+  row.innerHTML = `
+    <td class="type">${event.type}</td>
+    <td>${event.side ?? ""}</td>
+    <td>${event.price ?? ""}</td>
+    <td>${event.quantity ?? ""}</td>
+    <td style="color:var(--muted)">${event.reason ?? event.orderId ?? ""}</td>`;
+  const feed = el("feed");
+  feed.prepend(row);
+  // An unbounded tape is a memory leak with a scrollbar.
+  if (++state.feedRows > MAX_FEED_ROWS) {
+    feed.lastElementChild.remove();
+    state.feedRows--;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Market data
+// ---------------------------------------------------------------------------
+
+function connect(symbol) {
+  if (state.socket) {
+    state.socket.onclose = null;   // this close is intentional, do not retry it
+    state.socket.close();
+  }
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  const socket = new WebSocket(`${scheme}://${location.host}/stream/${symbol}`);
+  state.socket = socket;
+
+  socket.onopen = () => setStatus("live", "live");
+  socket.onclose = () => {
+    setStatus("down", "reconnecting");
+    // The engine outliving a page reload is the normal case, so a dropped
+    // socket is worth retrying rather than reporting and giving up.
+    setTimeout(() => { if (state.socket === socket) connect(state.symbol); }, 1000);
+  };
+  socket.onmessage = (message) => {
+    const event = JSON.parse(message.data);
+    if (event.type === "depth") {
+      renderDepth(event.depth);
+      return;
+    }
+    appendFeed(event);
+    trackWorking(event);
+  };
+}
+
+/**
+ * Keeps the working-order list in step with the event stream.
+ *
+ * Only orders submitted from this page are tracked: the engine has no notion of
+ * a session, so "mine" is a client-side idea and honestly labelled as one.
+ */
+function trackWorking(event) {
+  const id = event.orderId;
+  if (id == null || !state.working.has(id) && event.type !== "rested") return;
+
+  switch (event.type) {
+    case "rested":
+      if (state.pending.has(id)) {
+        state.working.set(id, {
+          side: event.side,
+          price: event.price,
+          remaining: event.remainingQuantity,
+        });
+        state.pending.delete(id);
+      }
+      break;
+    case "trade":
+      if (state.working.has(id)) {
+        state.working.get(id).remaining = event.remainingQuantity;
+      }
+      break;
+    case "replaced":
+      if (state.working.has(id)) {
+        Object.assign(state.working.get(id),
+          { price: event.price, remaining: event.remainingQuantity });
+      }
+      break;
+    case "filled":
+    case "canceled":
+      state.working.delete(id);
+      break;
+  }
+  renderWorking();
+}
+
+function setStatus(cls, text) {
+  el("dot").className = "dot " + cls;
+  el("conn").textContent = text;
+}
+
+// ---------------------------------------------------------------------------
+// Order entry
+// ---------------------------------------------------------------------------
+
+async function submitOrder(e) {
+  e.preventDefault();
+  const type = el("type").value;
+  const body = {
+    symbol: state.symbol,
+    side: state.side,
+    type,
+    timeInForce: el("tif").value,
+    quantity: Number(el("quantity").value),
+  };
+  if (type === "LIMIT") body.price = Number(el("price").value);
+
+  const result = el("result");
+  try {
+    const response = await fetch("/api/v1/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (payload.orderId != null && !payload.rejectReason) state.pending.add(payload.orderId);
+    // A reject is a real answer from the engine, not a failure of the page, so
+    // it is reported in the engine's own words.
+    result.className = "working " + (payload.rejectReason ? "err" : "ok");
+    result.textContent = payload.rejectReason
+      ? `rejected: ${payload.rejectReason}`
+      : `${payload.status} · filled ${payload.filledQuantity} · resting ${payload.restingQuantity}`;
+  } catch (err) {
+    result.className = "working err";
+    result.textContent = "could not reach the service";
+  }
+}
+
+async function cancelOrder(orderId) {
+  const response = await fetch(`/api/v1/orders/${orderId}`, { method: "DELETE" });
+  const payload = await response.json();
+  const result = el("result");
+  result.className = "working " + (payload.rejectReason ? "err" : "ok");
+  result.textContent = payload.rejectReason
+    ? `cancel rejected: ${payload.rejectReason}`
+    : `canceled ${payload.canceledQuantity}`;
+}
+
+// ---------------------------------------------------------------------------
+// Wiring
+// ---------------------------------------------------------------------------
+
+document.querySelectorAll(".side-buttons button").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.side = button.dataset.side;
+    document.querySelectorAll(".side-buttons button")
+      .forEach((b) => b.classList.toggle("on", b === button));
+  });
+});
+
+el("type").addEventListener("change", () => {
+  // A market order carries no price; showing an editable one invites the
+  // question of why it is ignored.
+  el("price").disabled = el("type").value === "MARKET";
+});
+
+el("entry").addEventListener("submit", submitOrder);
+
+el("working").addEventListener("click", (e) => {
+  const id = e.target.dataset?.cancel;
+  if (id) cancelOrder(id);
+});
+
+el("symbol").addEventListener("change", () => {
+  state.symbol = el("symbol").value;
+  state.working.clear();
+  state.pending.clear();
+  renderWorking();
+  connect(state.symbol);
+});
+
+(async function start() {
+  const symbols = await (await fetch("/api/v1/symbols")).json();
+  el("symbol").innerHTML = symbols.map((s) => `<option>${s}</option>`).join("");
+  state.symbol = symbols[0];
+  connect(state.symbol);
+})();
+</script>
+</body>
+</html>
