@@ -19,6 +19,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                          single client request can ask of the engine thread
  * @param orderPoolCapacity orders preallocated at startup, so steady-state
  *                          trading allocates nothing
+ * @param streamCapacity    bound on the market-data queue. Overflowing drops
+ *                          events rather than stalling the engine — matching
+ *                          outranks the feed
+ * @param depthIntervalMs   how often a depth snapshot is pushed to subscribers
  */
 @ConfigurationProperties(prefix = "lob")
 public record LobProperties(
@@ -26,7 +30,9 @@ public record LobProperties(
         int queueCapacity,
         long commandTimeoutMs,
         int maxDepthLevels,
-        int orderPoolCapacity) {
+        int orderPoolCapacity,
+        int streamCapacity,
+        long depthIntervalMs) {
 
     private static final List<String> DEFAULT_SYMBOLS = List.of("AAPL", "MSFT", "NVDA");
 
@@ -41,5 +47,7 @@ public record LobProperties(
         commandTimeoutMs = commandTimeoutMs <= 0 ? 1_000L : commandTimeoutMs;
         maxDepthLevels = maxDepthLevels <= 0 ? 20 : maxDepthLevels;
         orderPoolCapacity = orderPoolCapacity <= 0 ? 1 << 16 : orderPoolCapacity;
+        streamCapacity = streamCapacity <= 0 ? 1 << 14 : streamCapacity;
+        depthIntervalMs = depthIntervalMs <= 0 ? 250L : depthIntervalMs;
     }
 }

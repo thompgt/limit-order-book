@@ -14,6 +14,12 @@ lob:
   command-timeout-ms: 1000
   max-depth-levels: 20
   order-pool-capacity: 65536
+  # Market data is best effort: overflowing this drops events rather than
+  # stalling the engine on a slow subscriber.
+  stream-capacity: 16384
+  # Depth is sampled on a clock, not sent per book change - no screen can
+  # render thousands of updates a second, and sampling bounds the rate.
+  depth-interval-ms: 250
 
 management:
   endpoints:

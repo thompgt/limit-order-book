@@ -5,7 +5,6 @@ import io.github.thompgt.lob.api.engine.SymbolRegistry;
 import io.github.thompgt.lob.core.ExecutionSink;
 import io.github.thompgt.lob.core.MatchingEngine;
 import io.github.thompgt.lob.core.OrderPool;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -26,17 +25,6 @@ public class EngineConfig {
     @Bean
     public SymbolRegistry symbolRegistry(LobProperties properties) {
         return new SymbolRegistry(properties.symbols());
-    }
-
-    /**
-     * The event sink the engine publishes to. Defaults to discarding events, so
-     * the engine runs with or without a market-data layer in front of it; the
-     * WebSocket broadcaster replaces this bean when it is present.
-     */
-    @Bean
-    @ConditionalOnMissingBean(ExecutionSink.class)
-    public ExecutionSink executionSink() {
-        return ExecutionSink.NO_OP;
     }
 
     /**

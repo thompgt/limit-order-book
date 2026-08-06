@@ -2,6 +2,7 @@ package io.github.thompgt.lob.api;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Entry point for the order-book service.
@@ -12,6 +13,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * single-threaded under concurrent requests.
  */
 @SpringBootApplication
+@EnableScheduling // the depth ticker samples the book on a clock
 public class LobApplication {
 
     public static void main(String[] args) {
