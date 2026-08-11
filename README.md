@@ -68,7 +68,7 @@ and a second thing to break in CI, and this page renders two lists.
 | `GET /api/v1/book/{symbol}` | L2 depth, `?levels=N` |
 | `GET /api/v1/symbols` | what is trading |
 | `ws://…/stream/{symbol}` | execution reports as they happen, plus a depth snapshot every 250ms |
-| `GET /actuator/prometheus` | `lob_engine_queue_depth`, `lob_pool_allocations`, `lob_stream_dropped`, … |
+| `GET /actuator/prometheus` | `lob_engine_queue_depth`, `lob_pool_allocations`, `lob_stream_dropped`, `lob_stream_failed`, … |
 
 A reject carries the status that describes it — duplicate id `409`, unknown
 symbol or order `404`, anything else `400` — so a client never has to read a

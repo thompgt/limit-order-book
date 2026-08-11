@@ -8,6 +8,8 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The engine's event sink, and the seam between matching and the network.
@@ -29,6 +31,8 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class MarketDataBroadcaster implements ExecutionSink, AutoCloseable {
 
+    private static final Logger log = LoggerFactory.getLogger(MarketDataBroadcaster.class);
+
     private static final long POLL_TIMEOUT_MS = 100L;
 
     private final MarketDataHandler handler;
@@ -36,6 +40,7 @@ public final class MarketDataBroadcaster implements ExecutionSink, AutoCloseable
     private final Thread thread;
     private final AtomicLong dropped = new AtomicLong();
     private final AtomicLong published = new AtomicLong();
+    private final AtomicLong failed = new AtomicLong();
 
     private volatile boolean running = true;
 
@@ -109,9 +114,28 @@ public final class MarketDataBroadcaster implements ExecutionSink, AutoCloseable
                 Thread.currentThread().interrupt();
                 return;
             } catch (RuntimeException e) {
-                // One bad subscriber must not end the feed for everyone else.
-                published.incrementAndGet();
+                // One bad subscriber must not end the feed for everyone else -
+                // but a write that threw is not a write that happened. Counting
+                // it as published made a broadcaster failing every single event
+                // look perfectly healthy.
+                failed.incrementAndGet();
+                log.warn("dropping a market data event: publishing it failed", e);
             }
+        }
+        drainOnShutdown();
+    }
+
+    /**
+     * Fails fast on whatever is still queued at shutdown. The events are gone
+     * either way; counting them keeps the totals honest rather than leaving a
+     * silent gap between what the engine emitted and what was published.
+     */
+    private void drainOnShutdown() {
+        int remaining = queue.size();
+        queue.clear();
+        if (remaining > 0) {
+            dropped.addAndGet(remaining);
+            log.info("discarded {} market data events at shutdown", remaining);
         }
     }
 
@@ -124,13 +148,31 @@ public final class MarketDataBroadcaster implements ExecutionSink, AutoCloseable
         return published.get();
     }
 
+    /** Events whose write threw. A rising line is a subscriber, not the engine. */
+    public long failedEvents() {
+        return failed.get();
+    }
+
     public int queueDepth() {
         return queue.size();
     }
 
+    /**
+     * Stops the publisher and accounts for whatever it did not get to.
+     *
+     * <p>Joins the thread rather than only interrupting it, as the dispatcher
+     * does: returning while the publisher is still writing means shutdown races
+     * the socket layer being torn down underneath it.
+     */
     @Override
     public void close() {
         running = false;
         thread.interrupt();
+        try {
+            thread.join(TimeUnit.SECONDS.toMillis(5));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        drainOnShutdown();
     }
 }

@@ -99,6 +99,11 @@ public class EngineMetrics implements MeterBinder {
                 .description("events written to subscribers")
                 .register(registry);
 
+        Gauge.builder("lob.stream.failed", broadcaster, MarketDataBroadcaster::failedEvents)
+                .description("events whose write threw; a broadcaster failing every "
+                        + "write used to look healthy")
+                .register(registry);
+
         // These four come from engine state, which only the engine thread may
         // read. They are sampled on a clock rather than on scrape - see the
         // class note - so here they are ordinary field reads.
