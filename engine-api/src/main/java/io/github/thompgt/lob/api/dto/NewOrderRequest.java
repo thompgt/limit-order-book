@@ -39,9 +39,20 @@ public record NewOrderRequest(
         return parseEnum(TimeInForce.class, timeInForce, "timeInForce", TimeInForce.DAY);
     }
 
-    /** @return the limit price, or 0 for a market order where it is unused */
-    public long priceOrZero() {
-        return price == null ? 0L : price;
+    /**
+     * The limit price for a LIMIT order.
+     *
+     * <p>There is no default. A missing price used to become tick 0, which the
+     * engine happily rested a bid at; a price is the one thing a limit order
+     * cannot be submitted without, so its absence is a bad request.
+     *
+     * @throws BadRequestException if no price was supplied
+     */
+    public long limitPrice() {
+        if (price == null) {
+            throw new BadRequestException("price is required for a LIMIT order");
+        }
+        return price;
     }
 
     private static <E extends Enum<E>> E parseEnum(

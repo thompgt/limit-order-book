@@ -38,5 +38,13 @@ public enum RejectReason {
      * already traded. There is nothing left to leave open, and silently turning
      * it into a cancel would be a different instruction than the one sent.
      */
-    QUANTITY_BELOW_FILLED
+    QUANTITY_BELOW_FILLED,
+
+    /**
+     * A limit price outside the tradeable band: zero or negative, which is not
+     * a price at all. The engine checks this itself rather than trusting the
+     * boundary — a missing price arriving as 0 must not become a resting bid at
+     * tick 0.
+     */
+    PRICE_OUT_OF_RANGE
 }

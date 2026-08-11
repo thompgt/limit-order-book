@@ -71,7 +71,9 @@ public class OrderController {
         var tif = request.parsedTimeInForce();
         long quantity = request.quantity();
         boolean market = request.parsedType() == NewOrderRequest.OrderType.MARKET;
-        long price = request.priceOrZero();
+        // Read only for a limit order: a market order has no price, and asking
+        // for one would reject a request that is perfectly well formed.
+        long price = market ? 0L : request.limitPrice();
 
         OrderResponse response = call(engine -> {
             SubmitResult result = market

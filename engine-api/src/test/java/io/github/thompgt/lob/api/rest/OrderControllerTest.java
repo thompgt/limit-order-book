@@ -124,6 +124,27 @@ class OrderControllerTest {
     }
 
     @Test
+    void aLimitOrderWithoutAPriceIsRefusedRatherThanRestingAtTickZero() throws Exception {
+        mvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"symbol":"AAPL","side":"BUY","quantity":5}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("price")));
+    }
+
+    @Test
+    void aNegativeLimitPriceIsRejectedByTheEngine() throws Exception {
+        mvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"symbol":"AAPL","side":"BUY","price":-100,"quantity":5}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.rejectReason").value("PRICE_OUT_OF_RANGE"));
+    }
+
+    @Test
     void cancellingAnOrderTakesTheOpenQuantityBack() throws Exception {
         mvc.perform(post("/api/v1/orders")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -462,13 +462,30 @@ class MatchingEngineTest {
     }
 
     @Test
-    void theOppositeSidesSentinelIsAnOrdinaryLimitPrice() {
-        // Only a side's own sentinel is reserved. Long.MIN_VALUE as a buy limit
-        // is merely a bid nobody will ever hit — absurd, but well defined.
+    void theOppositeSidesSentinelIsOutOfRangeRatherThanReserved() {
+        // Only a side's own sentinel is reserved, but Long.MIN_VALUE is still
+        // not a price: the band starts at 1 tick, so it is refused as out of
+        // range rather than resting as a bid nobody could ever hit.
         SubmitResult result =
                 engine.submit(1L, SYMBOL, Side.BUY, TimeInForce.DAY, Side.SELL.marketPrice(), 10L);
 
-        assertThat(result.status()).isEqualTo(OrderStatus.RESTING);
+        assertThat(result.rejectReason()).isEqualTo(RejectReason.PRICE_OUT_OF_RANGE);
+    }
+
+    @Test
+    void aLimitPricedAtZeroIsRejectedRatherThanRestingAtTickZero() {
+        // A boundary that forgets to send a price sends 0. Resting that as a
+        // real bid is how a missing field becomes a live order.
+        SubmitResult result = engine.submit(1L, SYMBOL, Side.BUY, TimeInForce.DAY, 0L, 10L);
+
+        assertThat(result.rejectReason()).isEqualTo(RejectReason.PRICE_OUT_OF_RANGE);
+    }
+
+    @Test
+    void aNegativeLimitPriceIsRejected() {
+        SubmitResult result = engine.submit(1L, SYMBOL, Side.SELL, TimeInForce.DAY, -5L, 10L);
+
+        assertThat(result.rejectReason()).isEqualTo(RejectReason.PRICE_OUT_OF_RANGE);
     }
 
     @Test

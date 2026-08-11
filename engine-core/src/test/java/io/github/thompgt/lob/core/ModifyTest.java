@@ -330,6 +330,17 @@ class ModifyTest {
     }
 
     @Test
+    void modifyingToANonPositivePriceIsRejected() {
+        submit(1L, Side.BUY, 100L, 10L);
+
+        assertThat(engine.modify(1L, 0L, 10L).rejectReason())
+                .isEqualTo(RejectReason.PRICE_OUT_OF_RANGE);
+        assertThat(engine.modify(1L, -3L, 10L).rejectReason())
+                .isEqualTo(RejectReason.PRICE_OUT_OF_RANGE);
+        assertThat(book.bestBid()).isEqualTo(100L);
+    }
+
+    @Test
     void aRejectedModifyConsumesNoSequenceNumber() {
         submit(1L, Side.BUY, 100L, 10L);
         engine.modify(99L, 100L, 10L);

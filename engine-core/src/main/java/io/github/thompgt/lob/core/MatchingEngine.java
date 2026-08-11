@@ -252,6 +252,12 @@ public final class MatchingEngine {
             // otherwise a limit at Long.MAX_VALUE would silently sweep the book.
             return RejectReason.RESERVED_PRICE;
         }
+        if (limitOrder && price <= 0) {
+            // Not a price. Checked here and not only at the API boundary,
+            // because a boundary that forgets to send one would otherwise rest
+            // an order at tick 0 rather than being told no.
+            return RejectReason.PRICE_OUT_OF_RANGE;
+        }
         return null;
     }
 
@@ -384,6 +390,9 @@ public final class MatchingEngine {
         }
         if (newPrice == order.side.marketPrice()) {
             return RejectReason.RESERVED_PRICE;
+        }
+        if (newPrice <= 0) {
+            return RejectReason.PRICE_OUT_OF_RANGE;
         }
         if (newQuantity <= order.filledQuantity()) {
             return RejectReason.QUANTITY_BELOW_FILLED;
