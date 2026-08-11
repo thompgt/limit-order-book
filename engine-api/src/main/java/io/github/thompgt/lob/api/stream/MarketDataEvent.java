@@ -18,6 +18,19 @@ import io.github.thompgt.lob.core.RejectReason;
  * <p>One flat record rather than a type per event, because the consumer is a
  * browser: it switches on {@code type} and reads the fields that came with it.
  * Absent fields are omitted from the JSON rather than sent as nulls.
+ *
+ * <h2>{@code sequence} is the durable identity, not {@code orderId}</h2>
+ *
+ * An order id is unique only among <em>live</em> orders: the moment an order
+ * fills or is cancelled the id is free again, and the engine will accept
+ * another order under it. That is deliberate — an id is the client's handle for
+ * cancel and modify, and there is nothing to address once the order is gone —
+ * but it means a consumer stitching a tape together by {@code orderId} will
+ * merge two unrelated orders. Every event that names an order therefore carries
+ * the engine {@code sequence} that was assigned to it, including
+ * {@link #restingSequence} for the passive side of a trade. Sequences are
+ * monotonic and never reused, so a (symbol, sequence) pair identifies an order
+ * for as long as the tape exists.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record MarketDataEvent(
@@ -32,6 +45,7 @@ public record MarketDataEvent(
         Long sequence,
         Long tradeId,
         Long restingOrderId,
+        Long restingSequence,
         Long previousPrice,
         Long previousQuantity,
         Boolean priorityLost,
@@ -48,7 +62,7 @@ public record MarketDataEvent(
                 order.quantity(),
                 order.remainingQuantity(),
                 order.sequence(),
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null);
     }
 
     static MarketDataEvent accepted(Order order) {
@@ -71,7 +85,7 @@ public record MarketDataEvent(
     static MarketDataEvent rejected(long orderId, int symbolId, RejectReason reason) {
         return new MarketDataEvent(
                 "rejected", symbolId, null, orderId,
-                null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null,
                 reason.name());
     }
 
@@ -80,7 +94,7 @@ public record MarketDataEvent(
         MarketDataEvent base = of("replaced", order);
         return new MarketDataEvent(
                 base.type, base.symbolId, null, base.orderId, base.side, base.price,
-                base.quantity, base.remainingQuantity, base.sequence, null, null,
+                base.quantity, base.remainingQuantity, base.sequence, null, null, null,
                 previousPrice, previousQuantity, priorityLost, null);
     }
 
@@ -93,21 +107,21 @@ public record MarketDataEvent(
         return new MarketDataEvent(
                 "trade", symbolId, null, aggressor.orderId(), aggressor.side().name(),
                 price, quantity, aggressor.remainingQuantity(), aggressor.sequence(),
-                tradeId, resting.orderId(), null, null, null, null);
+                tradeId, resting.orderId(), resting.sequence(), null, null, null, null);
     }
 
     /** Fills in the display name once the symbol id can be translated. */
     MarketDataEvent withSymbol(String symbol) {
         return new MarketDataEvent(
                 type, symbolId, symbol, orderId, side, price, quantity, remainingQuantity,
-                sequence, tradeId, restingOrderId, previousPrice, previousQuantity,
-                priorityLost, reason);
+                sequence, tradeId, restingOrderId, restingSequence, previousPrice,
+                previousQuantity, priorityLost, reason);
     }
 
     private MarketDataEvent withReason(String reason) {
         return new MarketDataEvent(
                 type, symbolId, symbol, orderId, side, price, quantity, remainingQuantity,
-                sequence, tradeId, restingOrderId, previousPrice, previousQuantity,
-                priorityLost, reason);
+                sequence, tradeId, restingOrderId, restingSequence, previousPrice,
+                previousQuantity, priorityLost, reason);
     }
 }

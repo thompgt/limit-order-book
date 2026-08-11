@@ -22,7 +22,11 @@ public final class Order {
     /** No participant identity was supplied. Never matches another account. */
     public static final long NO_ACCOUNT = 0L;
 
-    /** Client-visible identifier. Unique across the engine. */
+    /**
+     * Client-visible identifier. Unique among <em>live</em> orders only — it is
+     * released for reuse as soon as this order leaves the book. For an identity
+     * that survives that, use {@link #sequence}.
+     */
     long orderId;
 
     /** Which book this order belongs to. */

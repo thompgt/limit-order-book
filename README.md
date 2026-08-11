@@ -77,6 +77,11 @@ body to find out whether its order worked. A full command queue is `503` with
 command is abandoned rather than left queued — so retrying on it cannot land
 the same order twice.
 
+An order id is unique among **live** orders only — it is free again once the
+order fills or cancels. Every event on the stream therefore also carries the
+engine `sequence` (and `restingSequence` for the passive side of a trade),
+which is monotonic and never reused: key a tape by that, not by `orderId`.
+
 A client-supplied `orderId` must be below 1,000,000,000 — ids at or above that
 are the service's own, and letting a client claim one means its sequence walks
 into it later and 409s an order that was never a duplicate.

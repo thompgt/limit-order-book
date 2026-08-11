@@ -17,6 +17,14 @@ public enum RejectReason {
     /**
      * An order with this id is already live on the book. Ids are the client's
      * handle for cancel and modify, so two live orders may not share one.
+     *
+     * <p>Note the word <em>live</em>: an id becomes free again the moment the
+     * order it named fills or is cancelled, and a later order may reuse it.
+     * That is intended — there is nothing left to address once an order is gone
+     * — but it means an order id is not a durable identity, and a consumer
+     * keying a tape by it will merge two unrelated orders. The engine
+     * {@code sequence} is the durable one: monotonic, never reused, and carried
+     * on every event that names an order.
      */
     DUPLICATE_ORDER_ID,
 
