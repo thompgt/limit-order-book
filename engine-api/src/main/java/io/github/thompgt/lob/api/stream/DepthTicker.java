@@ -3,9 +3,12 @@ package io.github.thompgt.lob.api.stream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.thompgt.lob.api.LobProperties;
 import io.github.thompgt.lob.api.dto.DepthResponse;
+import io.github.thompgt.lob.api.dto.DepthSnapshot;
 import io.github.thompgt.lob.api.engine.EngineBusyException;
 import io.github.thompgt.lob.api.engine.EngineDispatcher;
 import io.github.thompgt.lob.api.engine.SymbolRegistry;
+import java.util.HashMap;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -22,7 +25,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>Snapshots are taken through the dispatcher like any other read, so each one
  * is a consistent view of a single instant rather than a book read while it was
- * changing.
+ * changing. The engine thread only fills a buffer this class already owns, one
+ * per symbol; the DTO and its JSON are built here. Only this thread touches
+ * those buffers, which is what makes reusing them safe.
  */
 @Component
 public class DepthTicker {
@@ -35,6 +40,9 @@ public class DepthTicker {
     private final LobProperties properties;
     private final ObjectMapper json;
 
+    /** One reusable capture buffer per symbol, touched only by this thread. */
+    private final Map<Integer, DepthSnapshot> buffers = new HashMap<>();
+
     public DepthTicker(
             EngineDispatcher dispatcher,
             MarketDataHandler handler,
@@ -46,6 +54,9 @@ public class DepthTicker {
         this.symbols = symbols;
         this.properties = properties;
         this.json = json;
+        for (int symbolId : symbols.ids()) {
+            buffers.put(symbolId, new DepthSnapshot(properties.maxDepthLevels()));
+        }
     }
 
     @Scheduled(fixedDelayString = "${lob.depth-interval-ms:250}")
@@ -56,10 +67,14 @@ public class DepthTicker {
             }
             try {
                 String name = symbols.nameOf(symbolId);
-                DepthResponse depth = dispatcher.call(
-                        engine -> DepthResponse.from(
-                                engine.book(symbolId), name, properties.maxDepthLevels()),
+                DepthSnapshot buffer = buffers.get(symbolId);
+                dispatcher.call(
+                        engine -> {
+                            buffer.capture(engine.book(symbolId), buffer.maxLevels());
+                            return Boolean.TRUE;
+                        },
                         properties.commandTimeoutMs());
+                DepthResponse depth = buffer.toResponse(name);
                 handler.broadcastDepth(symbolId, json.writeValueAsString(new Snapshot(depth)));
             } catch (EngineBusyException e) {
                 // A busy engine is exactly when depth matters least: the next

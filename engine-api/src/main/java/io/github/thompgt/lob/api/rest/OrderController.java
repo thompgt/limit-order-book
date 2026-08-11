@@ -3,6 +3,7 @@ package io.github.thompgt.lob.api.rest;
 import io.github.thompgt.lob.api.LobProperties;
 import io.github.thompgt.lob.api.dto.CancelResponse;
 import io.github.thompgt.lob.api.dto.DepthResponse;
+import io.github.thompgt.lob.api.dto.DepthSnapshot;
 import io.github.thompgt.lob.api.dto.ModifyOrderRequest;
 import io.github.thompgt.lob.api.dto.NewOrderRequest;
 import io.github.thompgt.lob.api.dto.OrderResponse;
@@ -125,7 +126,15 @@ public class OrderController {
                 // so an unbounded request would be one client stalling everyone.
                 : Math.min(Math.max(levels, 1), properties.maxDepthLevels());
 
-        return call(engine -> DepthResponse.from(engine.book(symbolId), name, maxLevels));
+        // Allocated here, on the request thread, and filled on the engine
+        // thread. Building the DTO inside the command would put a list, a
+        // lambda and a record per level in the matching path.
+        DepthSnapshot snapshot = new DepthSnapshot(maxLevels);
+        call(engine -> {
+            snapshot.capture(engine.book(symbolId), maxLevels);
+            return Boolean.TRUE;
+        });
+        return snapshot.toResponse(name);
     }
 
     /** What is trading here. The frontend reads this to populate its selector. */
