@@ -6,6 +6,7 @@ import io.github.thompgt.lob.core.MatchingEngine;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
@@ -31,6 +32,17 @@ import org.springframework.stereotype.Component;
  *       zero-allocation invariant failing in production rather than in a
  *       benchmark.</li>
  * </ul>
+ *
+ * <h2>Engine-derived gauges are sampled, not scraped</h2>
+ *
+ * Four of these read engine state, and the engine can only be read from its own
+ * thread. Doing that per scrape meant a lambda, a command and a future handed to
+ * the matching thread <em>four times</em> for every Prometheus poll — a
+ * monitoring system quietly allocating inside the thing it monitors. Instead one
+ * queued command per interval reads all four at once and publishes them to
+ * volatile fields, and a scrape is a field read. The cost of the sampling
+ * approach is that a gauge can be up to one interval stale, which for a value
+ * scraped every 15s is not a cost at all.
  */
 @Component
 public class EngineMetrics implements MeterBinder {
@@ -38,6 +50,20 @@ public class EngineMetrics implements MeterBinder {
     private final EngineDispatcher dispatcher;
     private final MarketDataBroadcaster broadcaster;
     private final LobProperties properties;
+
+    /** Last sampled engine state. Written by the sampler, read by scrapes. */
+    private volatile double liveOrders = Double.NaN;
+    private volatile double trades = Double.NaN;
+    private volatile double poolAllocations = Double.NaN;
+    private volatile double poolAvailable = Double.NaN;
+
+    /** Held, not created per sample: a capturing lambda is an allocation. */
+    private final java.util.function.Function<MatchingEngine, EngineSample> sampler =
+            engine -> new EngineSample(
+                    engine.liveOrderCount(),
+                    engine.tradeCount(),
+                    engine.pool().allocations(),
+                    engine.pool().available());
 
     public EngineMetrics(
             EngineDispatcher dispatcher,
@@ -47,6 +73,9 @@ public class EngineMetrics implements MeterBinder {
         this.broadcaster = broadcaster;
         this.properties = properties;
     }
+
+    /** The four engine-derived numbers, read in one pass on the engine thread. */
+    private record EngineSample(long live, long trades, long allocations, long available) {}
 
     @Override
     public void bindTo(MeterRegistry registry) {
@@ -70,38 +99,49 @@ public class EngineMetrics implements MeterBinder {
                 .description("events written to subscribers")
                 .register(registry);
 
-        // These read engine state, so they go through the queue like everything
-        // else - a gauge scrape must not be the one thing that touches the
-        // engine from a second thread.
-        Gauge.builder("lob.orders.live", this, m -> m.onEngine(MatchingEngine::liveOrderCount))
+        // These four come from engine state, which only the engine thread may
+        // read. They are sampled on a clock rather than on scrape - see the
+        // class note - so here they are ordinary field reads.
+        Gauge.builder("lob.orders.live", this, m -> m.liveOrders)
                 .description("orders currently resting across every book")
                 .register(registry);
 
-        Gauge.builder("lob.trades.total", this, m -> m.onEngine(e -> (double) e.tradeCount()))
+        Gauge.builder("lob.trades.total", this, m -> m.trades)
                 .description("trades executed since startup")
                 .register(registry);
 
-        Gauge.builder("lob.pool.allocations", this,
-                        m -> m.onEngine(e -> (double) e.pool().allocations()))
+        Gauge.builder("lob.pool.allocations", this, m -> m.poolAllocations)
                 .description("orders the pool had to allocate; flat after startup is the goal")
                 .register(registry);
 
-        Gauge.builder("lob.pool.available", this,
-                        m -> m.onEngine(e -> (double) e.pool().available()))
+        Gauge.builder("lob.pool.available", this, m -> m.poolAvailable)
                 .description("pooled orders ready for reuse")
                 .register(registry);
+
+        // Publish something before the first tick, so a scrape arriving in the
+        // first interval reads a number rather than NaN.
+        sample();
     }
 
     /**
-     * Reads a value off the engine thread, or reports NaN if the engine is too
-     * busy to answer. A scrape must never be able to hold up trading, so it gets
-     * a short timeout and no retry — a gap in a graph is cheaper than a stall.
+     * Reads the four engine-derived numbers in a single queued command.
+     *
+     * <p>A short timeout and no retry: sampling must never be able to hold up
+     * trading, and a gap in a graph is cheaper than a stall. If the engine is
+     * too busy to answer, the previous values stand rather than being wiped —
+     * a stale point is more informative than a missing one, and the queue-depth
+     * gauge (which needs no engine access) will already be showing why.
      */
-    private double onEngine(java.util.function.Function<MatchingEngine, Number> read) {
+    @Scheduled(fixedDelayString = "${lob.metrics-interval-ms:1000}")
+    public void sample() {
         try {
-            return dispatcher.call(engine -> read.apply(engine).doubleValue(), 100L).doubleValue();
+            EngineSample sample = dispatcher.call(sampler, 100L);
+            liveOrders = sample.live();
+            trades = sample.trades();
+            poolAllocations = sample.allocations();
+            poolAvailable = sample.available();
         } catch (RuntimeException e) {
-            return Double.NaN;
+            // Engine busy or shutting down. Keep the last known values.
         }
     }
 }

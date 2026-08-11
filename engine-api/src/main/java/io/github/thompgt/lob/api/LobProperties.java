@@ -23,6 +23,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                          events rather than stalling the engine — matching
  *                          outranks the feed
  * @param depthIntervalMs   how often a depth snapshot is pushed to subscribers
+ * @param metricsIntervalMs how often the engine-derived gauges are sampled.
+ *                          Read by {@code @Scheduled} on
+ *                          {@link EngineMetrics#sample()}; declared here so the
+ *                          knob is documented with the rest of them
  * @param maxPrice          highest acceptable limit price, in ticks
  * @param maxQuantity       largest acceptable order quantity. Both ceilings
  *                          exist so a level's cached total cannot be driven to
@@ -38,6 +42,7 @@ public record LobProperties(
         int orderPoolCapacity,
         int streamCapacity,
         long depthIntervalMs,
+        long metricsIntervalMs,
         long maxPrice,
         long maxQuantity) {
 
@@ -56,6 +61,7 @@ public record LobProperties(
         orderPoolCapacity = orderPoolCapacity <= 0 ? 1 << 16 : orderPoolCapacity;
         streamCapacity = streamCapacity <= 0 ? 1 << 14 : streamCapacity;
         depthIntervalMs = depthIntervalMs <= 0 ? 250L : depthIntervalMs;
+        metricsIntervalMs = metricsIntervalMs <= 0 ? 1_000L : metricsIntervalMs;
         maxPrice = maxPrice <= 0
                 ? io.github.thompgt.lob.core.MatchingEngine.DEFAULT_MAX_PRICE : maxPrice;
         maxQuantity = maxQuantity <= 0
