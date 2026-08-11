@@ -40,4 +40,7 @@ management:
         include: health,info,metrics,prometheus
   endpoint:
     health:
-      show-details: always
+      # Not "always": the order-entry API in front of this has no auth, so
+      # anything the health endpoint volunteers is volunteered to everyone.
+      # With no security on the classpath this shows status only.
+      show-details: when-authorized

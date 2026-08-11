@@ -70,6 +70,12 @@ and a second thing to break in CI, and this page renders two lists.
 | `ws://…/stream/{symbol}` | execution reports as they happen, plus a depth snapshot every 250ms |
 | `GET /actuator/prometheus` | `lob_engine_queue_depth`, `lob_pool_allocations`, `lob_stream_dropped`, `lob_stream_failed`, … |
 
+**This service is not hardened.** There is no authentication, no authorization
+and no rate limiting on order entry — it is a demo of a matching engine, not a
+venue. Health details are `when-authorized` rather than `always` for the same
+reason. Do not expose it beyond localhost without putting something in front of
+it.
+
 A reject carries the status that describes it — duplicate id `409`, unknown
 symbol or order `404`, anything else `400` — so a client never has to read a
 body to find out whether its order worked. A full command queue is `503` with
