@@ -69,8 +69,9 @@ class MarketDataStreamTest {
     }
 
     private WebSocketSession subscribe(String symbol, Collector collector) throws Exception {
+        URI uri = URI.create("ws://localhost:" + port + "/stream/" + symbol);
         return new StandardWebSocketClient()
-                .execute(collector, null, URI.create("ws://localhost:" + port + "/stream/" + symbol))
+                .execute(collector, null, uri)
                 .get(10, TimeUnit.SECONDS);
     }
 

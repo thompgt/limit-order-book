@@ -192,7 +192,8 @@ class OrderBookTest {
         rest(Side.BUY, 100L, 5L);
 
         List<String> levels = new ArrayList<>();
-        book.snapshot(Side.BUY, 10, (price, qty, count) -> levels.add(price + "x" + qty + "/" + count));
+        book.snapshot(Side.BUY, 10, (price, qty, count) ->
+                levels.add(price + "x" + qty + "/" + count));
 
         assertThat(levels).containsExactly("100x30/3");
     }

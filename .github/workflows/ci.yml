@@ -10,16 +10,36 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        # 21 is the language level the project targets; 24 is what it actually
+        # runs on. Building only one of them means the other is untested, and
+        # the interesting failures - JDK-version-sensitive tooling, annotation
+        # processors - are exactly the ones that only show up on the newer JVM.
+        java: ['21', '24']
+
+    name: build (JDK ${{ matrix.java }})
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK ${{ matrix.java }}
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: ${{ matrix.java }}
           distribution: 'temurin'
           cache: maven
 
+      # Checkstyle is bound to the validate phase, so `verify` below already
+      # runs it. Running it first on its own makes a style failure say so
+      # instead of appearing as a build failure after the test output.
+      - name: Checkstyle
+        run: ./mvnw -B checkstyle:check@checkstyle
+
+      # Includes AllocationTest, which asserts the submit / cancel / modify
+      # path still allocates nothing - the invariant the README sells, checked
+      # on every push rather than by a remembered `-prof gc` run.
       - name: Build and test
         run: ./mvnw -B verify
 

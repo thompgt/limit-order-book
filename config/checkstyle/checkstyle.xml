@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+    "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<!--
+  A deliberately small ruleset.
+
+  The point of running a checker here is to stop the mechanical mistakes that
+  review is bad at catching - a stale import, a tab that renders differently in
+  someone else's editor, an if without braces - not to legislate taste. A large
+  ruleset in a project this size produces noise, and noise is how a check gets
+  switched off. Everything below either prevents a bug or prevents a diff that
+  is entirely whitespace.
+-->
+<module name="Checker">
+  <property name="charset" value="UTF-8"/>
+  <property name="severity" value="error"/>
+  <property name="fileExtensions" value="java"/>
+
+  <!-- Tabs render at whatever width the reader's editor picked, so a file with
+       both is misaligned for somebody. -->
+  <module name="FileTabCharacter"/>
+
+  <module name="LineLength">
+    <property name="max" value="100"/>
+    <!-- A URL cannot be wrapped without breaking it. -->
+    <property name="ignorePattern" value="^\s*\*.*https?://|^import "/>
+  </module>
+
+  <module name="TreeWalker">
+    <!-- An import left behind after the code that used it went away. -->
+    <module name="UnusedImports">
+      <property name="processJavadoc" value="true"/>
+    </module>
+    <module name="RedundantImport"/>
+    <!-- A wildcard import hides which type a name refers to and breaks the
+         moment two packages both offer it. -->
+    <module name="AvoidStarImport"/>
+
+    <!-- The classic: adding a second statement to a braceless if. -->
+    <module name="NeedBraces"/>
+    <module name="EmptyStatement"/>
+
+    <!-- Overriding one without the other breaks every hash-based collection. -->
+    <module name="EqualsHashCode"/>
+    <module name="CovariantEquals"/>
+
+    <!-- A switch that falls through silently, and a default that is missing. -->
+    <module name="FallThrough"/>
+
+    <!-- Assigning to a parameter makes the caller's argument name a lie. -->
+    <module name="ModifiedControlVariable"/>
+
+    <module name="OneStatementPerLine"/>
+    <module name="UpperEll"/>
+    <module name="ArrayTypeStyle"/>
+  </module>
+</module>

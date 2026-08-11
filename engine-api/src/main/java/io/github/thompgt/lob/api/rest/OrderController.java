@@ -10,11 +10,13 @@ import io.github.thompgt.lob.api.dto.OrderResponse;
 import io.github.thompgt.lob.api.engine.EngineDispatcher;
 import io.github.thompgt.lob.api.engine.SymbolRegistry;
 import io.github.thompgt.lob.core.CancelResult;
+import io.github.thompgt.lob.core.MatchingEngine;
 import io.github.thompgt.lob.core.RejectReason;
 import io.github.thompgt.lob.core.SubmitResult;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -151,7 +153,7 @@ public class OrderController {
         return symbols.names();
     }
 
-    private <T> T call(java.util.function.Function<io.github.thompgt.lob.core.MatchingEngine, T> command) {
+    private <T> T call(Function<MatchingEngine, T> command) {
         return dispatcher.call(command, properties.commandTimeoutMs());
     }
 

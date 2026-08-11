@@ -44,11 +44,15 @@ Requires a JDK (21+). No Maven install needed — the wrapper bootstraps it.
 git clone https://github.com/thompgt/limit-order-book.git
 cd limit-order-book
 
-./mvnw -B verify                              # build + tests
+./mvnw -B verify                              # checkstyle + build + tests
 ./mvnw -B install -DskipTests                 # put engine-core in the local repo
 ./mvnw -pl engine-api spring-boot:run         # API + UI on http://localhost:8080
 ./mvnw -pl engine-bench -am -Pbench verify    # benchmarks
 ```
+
+CI runs `verify` on **JDK 21 and 24** — the level the project targets and the
+one it actually runs on. Checkstyle is bound to the `validate` phase, so a style
+violation fails locally rather than being discovered after a push.
 
 The `install` is needed once before `-pl engine-api` will resolve `engine-core`.
 On Windows PowerShell use `.\mvnw.cmd` in place of `./mvnw`.
@@ -125,6 +129,10 @@ curl -X POST localhost:8080/api/v1/orders -H 'content-type: application/json' \
 | **Latency p99.9** | — | ″ |
 | Latency p99.99 | — | ″ |
 | Allocation on hot path | — | ″ (`-prof gc`) |
+
+The allocation claim does not wait for a benchmark run: `AllocationTest` drives
+800,000 submit / modify / cancel commands and asserts the order pool never grew
+and the thread's allocation counter did not move, and it runs on every build.
 
 Latency is measured with a fixed-rate submitter and HdrHistogram's
 `recordValueWithExpectedInterval`, so the tail is corrected for coordinated

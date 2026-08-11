@@ -33,6 +33,8 @@
     <surefire.plugin.version>3.5.2</surefire.plugin.version>
     <compiler.plugin.version>3.13.0</compiler.plugin.version>
     <shade.plugin.version>3.6.0</shade.plugin.version>
+    <checkstyle.plugin.version>3.6.0</checkstyle.plugin.version>
+    <checkstyle.version>10.21.0</checkstyle.version>
   </properties>
 
   <dependencyManagement>
@@ -126,5 +128,36 @@
         </plugin>
       </plugins>
     </pluginManagement>
+
+    <plugins>
+      <!-- Bound to validate rather than left as a separate CI step: a check
+           that only runs in CI is a check people discover after pushing. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-checkstyle-plugin</artifactId>
+        <version>${checkstyle.plugin.version}</version>
+        <dependencies>
+          <dependency>
+            <groupId>com.puppycrawl.tools</groupId>
+            <artifactId>checkstyle</artifactId>
+            <version>${checkstyle.version}</version>
+          </dependency>
+        </dependencies>
+        <configuration>
+          <configLocation>${maven.multiModuleProjectDirectory}/config/checkstyle/checkstyle.xml</configLocation>
+          <includeTestSourceDirectory>true</includeTestSourceDirectory>
+          <consoleOutput>true</consoleOutput>
+          <failOnViolation>true</failOnViolation>
+          <violationSeverity>error</violationSeverity>
+        </configuration>
+        <executions>
+          <execution>
+            <id>checkstyle</id>
+            <phase>validate</phase>
+            <goals><goal>check</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
   </build>
 </project>
