@@ -56,6 +56,22 @@ public final class MatchingEngine {
     /** Reported when a result has no symbol, because no order was found. */
     public static final int NO_SYMBOL = -1;
 
+    /**
+     * Default ceiling on a limit price and on an order quantity, in ticks and
+     * units respectively.
+     *
+     * <p>A trillion is far past any real instrument and still leaves nine
+     * million maximum-sized orders' worth of headroom before a level's cached
+     * {@code totalQuantity} could overflow. Without a ceiling, two orders at
+     * {@link Long#MAX_VALUE} on one price wrap that total negative, and depth,
+     * {@link OrderBook#fillableQuantity} and therefore fill-or-kill all start
+     * answering wrongly with no error anywhere.
+     */
+    public static final long DEFAULT_MAX_PRICE = 1_000_000_000_000L;
+
+    /** @see #DEFAULT_MAX_PRICE */
+    public static final long DEFAULT_MAX_QUANTITY = 1_000_000_000_000L;
+
     private final ExecutionSink sink;
     private final OrderIndex index;
     private final OrderPool pool;
@@ -71,6 +87,9 @@ public final class MatchingEngine {
 
     private long nextTradeId;
 
+    private final long maxPrice;
+    private final long maxQuantity;
+
     public MatchingEngine() {
         this(ExecutionSink.NO_OP);
     }
@@ -80,9 +99,33 @@ public final class MatchingEngine {
     }
 
     public MatchingEngine(ExecutionSink sink, OrderPool pool) {
+        this(sink, pool, DEFAULT_MAX_PRICE, DEFAULT_MAX_QUANTITY);
+    }
+
+    /**
+     * @param maxPrice    highest acceptable limit price in ticks
+     * @param maxQuantity largest acceptable order quantity
+     * @see #DEFAULT_MAX_PRICE
+     */
+    public MatchingEngine(ExecutionSink sink, OrderPool pool, long maxPrice, long maxQuantity) {
+        if (maxPrice <= 0 || maxQuantity <= 0) {
+            throw new IllegalArgumentException("maxPrice and maxQuantity must be positive");
+        }
         this.sink = sink;
         this.pool = pool;
         this.index = new OrderIndex();
+        this.maxPrice = maxPrice;
+        this.maxQuantity = maxQuantity;
+    }
+
+    /** Highest limit price this engine will accept, in ticks. */
+    public long maxPrice() {
+        return maxPrice;
+    }
+
+    /** Largest order quantity this engine will accept. */
+    public long maxQuantity() {
+        return maxQuantity;
     }
 
     /**
@@ -241,6 +284,9 @@ public final class MatchingEngine {
         if (quantity <= 0) {
             return RejectReason.NON_POSITIVE_QUANTITY;
         }
+        if (quantity > maxQuantity) {
+            return RejectReason.QUANTITY_OUT_OF_RANGE;
+        }
         if (!books.containsKey(symbolId)) {
             return RejectReason.UNKNOWN_SYMBOL;
         }
@@ -251,6 +297,9 @@ public final class MatchingEngine {
             // The sentinel is reserved. Refusing keeps the encoding honest:
             // otherwise a limit at Long.MAX_VALUE would silently sweep the book.
             return RejectReason.RESERVED_PRICE;
+        }
+        if (limitOrder && price > maxPrice) {
+            return RejectReason.PRICE_OUT_OF_RANGE;
         }
         if (limitOrder && price <= 0) {
             // Not a price. Checked here and not only at the API boundary,
@@ -388,10 +437,13 @@ public final class MatchingEngine {
         if (newQuantity <= 0) {
             return RejectReason.NON_POSITIVE_QUANTITY;
         }
+        if (newQuantity > maxQuantity) {
+            return RejectReason.QUANTITY_OUT_OF_RANGE;
+        }
         if (newPrice == order.side.marketPrice()) {
             return RejectReason.RESERVED_PRICE;
         }
-        if (newPrice <= 0) {
+        if (newPrice <= 0 || newPrice > maxPrice) {
             return RejectReason.PRICE_OUT_OF_RANGE;
         }
         if (newQuantity <= order.filledQuantity()) {

@@ -45,6 +45,16 @@ public enum RejectReason {
      * a price at all. The engine checks this itself rather than trusting the
      * boundary — a missing price arriving as 0 must not become a resting bid at
      * tick 0.
+     *
+     * <p>Also covers a price above the engine's configured maximum.
      */
-    PRICE_OUT_OF_RANGE
+    PRICE_OUT_OF_RANGE,
+
+    /**
+     * A quantity above the engine's configured maximum. The bound is not
+     * bureaucracy: a price level's cached total is a {@code long}, so two
+     * orders near {@link Long#MAX_VALUE} at one price would wrap it negative
+     * and every depth and fill-or-kill answer derived from it would be a lie.
+     */
+    QUANTITY_OUT_OF_RANGE
 }

@@ -75,6 +75,11 @@ symbol or order `404`, anything else `400` — so a client never has to read a
 body to find out whether its order worked. A full command queue is `503` with
 `Retry-After`: that is a load condition, not a defect in the request.
 
+Prices and quantities are bounded (`lob.max-price`, `lob.max-quantity`, both
+10^12 by default). The bound is not policy: a price level's aggregate quantity
+is a `long`, so unbounded orders could wrap it negative and make depth and
+fill-or-kill answer from a negative number instead of failing.
+
 ```bash
 curl -X POST localhost:8080/api/v1/orders -H 'content-type: application/json' \
   -d '{"symbol":"AAPL","side":"SELL","price":100050,"quantity":25,"orderId":11}'
@@ -111,7 +116,7 @@ than taken on trust.
 | **Trading systems** | Price-time priority matching, aggressive-order sweeps across levels, partial fills, DAY / IOC / FOK, market orders, and the modify priority rules above — `MatchingEngine`, `OrderBook`, `PriceLevel` |
 | **Trade booking** | The execution-report lifecycle: accept → trade → fill / rest / cancel / replace, each event carrying trade id, sequence, price and quantity, emitted in the order it happened — `ExecutionSink`, `SubmitResult`, `CancelResult` |
 | **Market data** | L2 depth snapshots aggregated per price level, maintained incrementally so a snapshot is O(1) per level rather than a queue walk — `OrderBook.snapshot`, `DepthVisitor`. Streamed over WebSocket per symbol, with depth sampled on a clock so an unbounded book-change rate becomes a bounded message rate — `MarketDataBroadcaster`, `DepthTicker` |
-| **Java** | Java 21, no framework and no Lombok in the core: intrusive doubly-linked lists, an ownership contract on recycled objects, sealed-off package-private mutation, and a test suite that names the semantics it pins — 246 tests, 22 of them property-based with jqwik |
+| **Java** | Java 21, no framework and no Lombok in the core: intrusive doubly-linked lists, an ownership contract on recycled objects, sealed-off package-private mutation, and a test suite that names the semantics it pins — 251 tests, 23 of them property-based with jqwik |
 | **Low-latency JVM engineering** | The reason for most of the above: object pooling (`OrderPool`), primitive-keyed maps to avoid boxing (`OrderIndex`), reused result objects, callbacks instead of returned collections, and JMH + HdrHistogram with coordinated-omission correction. `-prof gc` found the ladder allocating 24–36 B/op and drove the swap to primitive-keyed trees — see the `OrderBook` javadoc for what it fixed and what it did not |
 | **Spring** | Spring Boot 3.5 as an API and ops layer — REST, WebSocket, actuator and Micrometer gauges, all fed through a single-consumer command queue that keeps the engine single-threaded under concurrent HTTP. Gauges, never timers on the command path: a timer there would measure only the commands that got to run |
 
@@ -125,7 +130,7 @@ inside `engine-core` it would pass trivially and prove nothing.
 
 Phases 0–5 complete: scaffold, core data structures, matching,
 cancel / modify / time-in-force, benchmarks, and the Spring API with its
-WebSocket feed and book viewer. 246 tests green — 204 in `engine-core`, 42 in
+WebSocket feed and book viewer. 251 tests green — 209 in `engine-core`, 42 in
 `engine-api`. Phase 6 (Docker image, tuning notes) is next.
 
 Progress tracked in [`docs/WORKPLAN.md`](docs/WORKPLAN.md); working conventions

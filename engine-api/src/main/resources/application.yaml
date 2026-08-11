@@ -20,6 +20,11 @@ lob:
   # Depth is sampled on a clock, not sent per book change - no screen can
   # render thousands of updates a second, and sampling bounds the rate.
   depth-interval-ms: 250
+  # Ceilings on what an order may ask for. A price level's cached total is a
+  # long; without a bound, two orders near Long.MAX_VALUE at one price wrap it
+  # negative and depth, fillable quantity and FOK all start lying.
+  max-price: 1000000000000
+  max-quantity: 1000000000000
 
 management:
   endpoints:

@@ -23,6 +23,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                          events rather than stalling the engine — matching
  *                          outranks the feed
  * @param depthIntervalMs   how often a depth snapshot is pushed to subscribers
+ * @param maxPrice          highest acceptable limit price, in ticks
+ * @param maxQuantity       largest acceptable order quantity. Both ceilings
+ *                          exist so a level's cached total cannot be driven to
+ *                          overflow — see
+ *                          {@link io.github.thompgt.lob.core.MatchingEngine#DEFAULT_MAX_PRICE}
  */
 @ConfigurationProperties(prefix = "lob")
 public record LobProperties(
@@ -32,7 +37,9 @@ public record LobProperties(
         int maxDepthLevels,
         int orderPoolCapacity,
         int streamCapacity,
-        long depthIntervalMs) {
+        long depthIntervalMs,
+        long maxPrice,
+        long maxQuantity) {
 
     private static final List<String> DEFAULT_SYMBOLS = List.of("AAPL", "MSFT", "NVDA");
 
@@ -49,5 +56,9 @@ public record LobProperties(
         orderPoolCapacity = orderPoolCapacity <= 0 ? 1 << 16 : orderPoolCapacity;
         streamCapacity = streamCapacity <= 0 ? 1 << 14 : streamCapacity;
         depthIntervalMs = depthIntervalMs <= 0 ? 250L : depthIntervalMs;
+        maxPrice = maxPrice <= 0
+                ? io.github.thompgt.lob.core.MatchingEngine.DEFAULT_MAX_PRICE : maxPrice;
+        maxQuantity = maxQuantity <= 0
+                ? io.github.thompgt.lob.core.MatchingEngine.DEFAULT_MAX_QUANTITY : maxQuantity;
     }
 }

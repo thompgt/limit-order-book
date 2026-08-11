@@ -49,6 +49,28 @@ class MatchingEngineProperties {
                 .ofMaxSize(120);
     }
 
+    /**
+     * The same shape, but with quantities drawn around and past the engine's
+     * ceiling — including {@link Long#MAX_VALUE}, the value that would wrap a
+     * level's cached total negative if it were ever allowed onto the book.
+     */
+    @Provide
+    Arbitrary<List<OrderSpec>> extremeQuantitySequences() {
+        Arbitrary<Side> sides = Arbitraries.of(Side.BUY, Side.SELL);
+        Arbitrary<Long> prices = Arbitraries.longs().between(95L, 105L);
+        Arbitrary<Long> quantities = Arbitraries.oneOf(
+                Arbitraries.longs().between(1L, 40L),
+                Arbitraries.longs().between(
+                        MatchingEngine.DEFAULT_MAX_QUANTITY - 10L,
+                        MatchingEngine.DEFAULT_MAX_QUANTITY + 10L),
+                Arbitraries.longs().between(Long.MAX_VALUE - 10L, Long.MAX_VALUE));
+        return Combinators.combine(sides, prices, quantities)
+                .as(OrderSpec::new)
+                .list()
+                .ofMinSize(1)
+                .ofMaxSize(120);
+    }
+
     private static Run execute(List<OrderSpec> specs) {
         RecordingSink sink = new RecordingSink();
         MatchingEngine engine = new MatchingEngine(sink);
@@ -151,6 +173,30 @@ class MatchingEngineProperties {
 
             assertThat(reported).as("side %s", side).isEqualTo(expected);
             assertThat(run.book().levelCount(side)).isEqualTo(expected.size());
+        }
+    }
+
+    @Property(tries = 500)
+    void cachedDepthNeverGoesNegativeHoweverLargeTheOrdersAre(
+            @ForAll("extremeQuantitySequences") List<OrderSpec> specs) {
+        MatchingEngine engine = new MatchingEngine(new RecordingSink());
+        OrderBook book = engine.registerSymbol(SYMBOL);
+
+        long id = 1L;
+        for (OrderSpec spec : specs) {
+            SubmitResult result = engine.submit(
+                    id++, SYMBOL, spec.side(), TimeInForce.DAY, spec.price(), spec.quantity());
+            assertThat(result.isRejected())
+                    .as("quantity %d", spec.quantity())
+                    .isEqualTo(spec.quantity() > engine.maxQuantity());
+        }
+
+        for (Side side : Side.values()) {
+            book.snapshot(side, Integer.MAX_VALUE, (price, qty, count) ->
+                    assertThat(qty).as("depth on %s at %d", side, price).isNotNegative());
+            assertThat(book.fillableQuantity(side, side.marketPrice(), Long.MAX_VALUE))
+                    .as("fillable on %s", side)
+                    .isNotNegative();
         }
     }
 

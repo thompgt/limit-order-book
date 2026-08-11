@@ -418,6 +418,49 @@ class MatchingEngineTest {
     }
 
     @Test
+    void aQuantityAboveTheCeilingIsRejected() {
+        // Two Long.MAX_VALUE orders at one price would wrap the level's cached
+        // total negative, and depth and FOK would answer from a negative number
+        // rather than fail. The ceiling is what keeps that arithmetic honest.
+        SubmitResult result =
+                engine.submit(1L, SYMBOL, Side.BUY, TimeInForce.DAY, 100L, Long.MAX_VALUE);
+
+        assertThat(result.rejectReason()).isEqualTo(RejectReason.QUANTITY_OUT_OF_RANGE);
+    }
+
+    @Test
+    void aPriceAboveTheCeilingIsRejected() {
+        SubmitResult result = engine.submit(
+                1L, SYMBOL, Side.BUY, TimeInForce.DAY,
+                MatchingEngine.DEFAULT_MAX_PRICE + 1L, 10L);
+
+        assertThat(result.rejectReason()).isEqualTo(RejectReason.PRICE_OUT_OF_RANGE);
+    }
+
+    @Test
+    void theCeilingsAreConfigurable() {
+        MatchingEngine tight =
+                new MatchingEngine(ExecutionSink.NO_OP, new OrderPool(), 500L, 50L);
+        tight.registerSymbol(SYMBOL);
+
+        assertThat(tight.submit(1L, SYMBOL, Side.BUY, TimeInForce.DAY, 501L, 10L).rejectReason())
+                .isEqualTo(RejectReason.PRICE_OUT_OF_RANGE);
+        assertThat(tight.submit(2L, SYMBOL, Side.BUY, TimeInForce.DAY, 500L, 51L).rejectReason())
+                .isEqualTo(RejectReason.QUANTITY_OUT_OF_RANGE);
+        assertThat(tight.submit(3L, SYMBOL, Side.BUY, TimeInForce.DAY, 500L, 50L).status())
+                .isEqualTo(OrderStatus.RESTING);
+    }
+
+    @Test
+    void aMarketOrderIsStillHeldToTheQuantityCeiling() {
+        // Its price is the sentinel and exempt, but its quantity is not.
+        SubmitResult result =
+                engine.submitMarket(1L, SYMBOL, Side.BUY, TimeInForce.IOC, Long.MAX_VALUE);
+
+        assertThat(result.rejectReason()).isEqualTo(RejectReason.QUANTITY_OUT_OF_RANGE);
+    }
+
+    @Test
     void anOrderForAnUnregisteredSymbolIsRejected() {
         SubmitResult result =
                 engine.submit(99L, 42, Side.BUY, TimeInForce.DAY, 100L, 10L);
