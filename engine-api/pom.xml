@@ -32,6 +32,12 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
     </dependency>
+    <!-- Request constraints belong on the record, declared once, rather than
+         thrown from whichever accessor a handler happens to call. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
 
     <!-- application.yaml exposes the prometheus actuator endpoint; without a
          registry on the classpath that endpoint silently does not exist. -->

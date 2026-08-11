@@ -5,6 +5,7 @@ import io.github.thompgt.lob.api.engine.EngineBusyException;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -24,6 +25,23 @@ public class ApiExceptionHandler {
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<Map<String, Object>> badRequest(BadRequestException e) {
         return body(HttpStatus.BAD_REQUEST, e.getMessage());
+    }
+
+    /**
+     * A declared constraint on a request record failed. Handled here so that
+     * the constraints can live on the record — the alternative is a check
+     * inside an accessor, which only runs if a handler happens to call that
+     * accessor, and which therefore makes validation a function of code path.
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, Object>> invalid(MethodArgumentNotValidException e) {
+        String message = e.getBindingResult().getFieldErrors().stream()
+                .map(error -> error.getDefaultMessage() == null
+                        ? error.getField() + " is invalid"
+                        : error.getDefaultMessage())
+                .sorted()
+                .collect(java.util.stream.Collectors.joining("; "));
+        return body(HttpStatus.BAD_REQUEST, message.isEmpty() ? "invalid request" : message);
     }
 
     /**

@@ -124,6 +124,31 @@ class OrderControllerTest {
     }
 
     @Test
+    void aBodyWithNoSymbolIsRefusedByADeclaredConstraint() throws Exception {
+        mvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"side":"BUY","price":9000,"quantity":1}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("symbol is required")));
+    }
+
+    @Test
+    void aModifyWithAMissingFieldSaysSoRatherThanReadingItAsZero() throws Exception {
+        // As a primitive this arrived as 0 and came back
+        // NON_POSITIVE_QUANTITY - a true statement about a number the client
+        // never sent.
+        mvc.perform(patch("/api/v1/orders/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"price":9000}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("quantity is required")));
+    }
+
+    @Test
     void aClientIdInsideTheServersRangeIsRefused() throws Exception {
         // Otherwise the server's own sequence eventually reaches it and 409s an
         // order that was never a duplicate of anything the client sent.

@@ -2,9 +2,24 @@ package io.github.thompgt.lob.api.dto;
 
 import io.github.thompgt.lob.core.Side;
 import io.github.thompgt.lob.core.TimeInForce;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 
 /**
  * A request to submit an order.
+ *
+ * <p>What can be said declaratively is said here, not in an accessor. A
+ * constraint that lives in a getter only runs if some handler happens to call
+ * that getter, so which checks a request actually gets depends on the code path
+ * it takes — and adding a handler quietly removes validation. The enum parsing
+ * below still throws, because "one of these three words" is not a constraint
+ * Jakarta expresses without a custom validator.
+ *
+ * <p>The division of labour: the boundary declares what must be <em>present</em>
+ * and well formed, the engine decides what is <em>tradeable</em>. So price and
+ * quantity are deliberately not annotated with bounds — the engine owns those,
+ * and it answers with a {@code rejectReason} a client can switch on rather than
+ * a validation message it has to read.
  *
  * @param symbol       instrument name, e.g. {@code AAPL}
  * @param side         {@code BUY} or {@code SELL}
@@ -20,13 +35,22 @@ import io.github.thompgt.lob.core.TimeInForce;
  *                     {@link io.github.thompgt.lob.core.SelfTradePolicy}
  */
 public record NewOrderRequest(
+        @NotBlank(message = "symbol is required")
         String symbol,
+
+        @NotBlank(message = "side is required")
         String side,
+
         String type,
         String timeInForce,
+
         Long price,
         long quantity,
+
+        @Positive(message = "orderId must be positive")
         Long orderId,
+
+        @Positive(message = "accountId must be positive")
         Long accountId) {
 
     public enum OrderType { LIMIT, MARKET }

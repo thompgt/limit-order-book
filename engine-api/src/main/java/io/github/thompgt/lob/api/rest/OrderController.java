@@ -12,6 +12,7 @@ import io.github.thompgt.lob.api.engine.SymbolRegistry;
 import io.github.thompgt.lob.core.CancelResult;
 import io.github.thompgt.lob.core.RejectReason;
 import io.github.thompgt.lob.core.SubmitResult;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.http.HttpStatus;
@@ -67,7 +68,8 @@ public class OrderController {
     }
 
     @PostMapping("/orders")
-    public ResponseEntity<OrderResponse> submit(@RequestBody NewOrderRequest request) {
+    public ResponseEntity<OrderResponse> submit(
+            @Valid @RequestBody NewOrderRequest request) {
         String symbol = request.symbol();
         int symbolId = symbols.idOf(symbol);
         long orderId = request.orderId() == null
@@ -111,7 +113,7 @@ public class OrderController {
      */
     @PatchMapping("/orders/{orderId}")
     public ResponseEntity<OrderResponse> modify(
-            @PathVariable long orderId, @RequestBody ModifyOrderRequest request) {
+            @PathVariable long orderId, @Valid @RequestBody ModifyOrderRequest request) {
         OrderResponse response = call(engine -> {
             SubmitResult result = engine.modify(orderId, request.price(), request.quantity());
             return OrderResponse.from(result, symbols.nameOf(result.symbolId()));
