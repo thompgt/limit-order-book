@@ -28,6 +28,17 @@ public final class PriceLevel {
 
     private int orderCount;
 
+    /**
+     * Intrusive ladder links, best price first, maintained by {@link OrderBook}.
+     *
+     * <p>The same trick as the order queue, one level up: walking the book from
+     * the best price outwards is a pointer chase rather than a tree iterator,
+     * so a fill-or-kill check and a depth snapshot allocate nothing. Package-
+     * private because only the book may reorder a ladder.
+     */
+    PriceLevel nextLevel;
+    PriceLevel prevLevel;
+
     /** Re-initialises this level for a price. Levels are pooled like orders. */
     public PriceLevel reset(long price) {
         this.price = price;
@@ -35,7 +46,14 @@ public final class PriceLevel {
         this.tail = null;
         this.totalQuantity = 0L;
         this.orderCount = 0;
+        this.nextLevel = null;
+        this.prevLevel = null;
         return this;
+    }
+
+    /** The next level outwards from the best price, or {@code null} at the end. */
+    public PriceLevel nextLevel() {
+        return nextLevel;
     }
 
     /**

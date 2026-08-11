@@ -310,6 +310,64 @@ class OrderBookTest {
         assertThat(book.bestLevel(Side.SELL).totalQuantity()).isEqualTo(10L);
     }
 
+    /** The ladder as the intrusive level list sees it, best price first. */
+    private List<Long> chain(Side side) {
+        List<Long> prices = new ArrayList<>();
+        for (PriceLevel level = book.bestLevel(side); level != null; level = level.nextLevel()) {
+            prices.add(level.price());
+        }
+        return prices;
+    }
+
+    @Test
+    void theLevelChainIsSortedBestFirstWhateverOrderPricesArriveIn() {
+        // The chain is what fillableQuantity and snapshot walk instead of a
+        // tree iterator, so its order is the ladder's order or nothing works.
+        rest(Side.SELL, 110L, 1L);
+        rest(Side.SELL, 108L, 1L);
+        rest(Side.SELL, 113L, 1L);
+        rest(Side.SELL, 109L, 1L);
+        rest(Side.SELL, 112L, 1L);
+
+        assertThat(chain(Side.SELL)).containsExactly(108L, 109L, 110L, 112L, 113L);
+
+        rest(Side.BUY, 100L, 1L);
+        rest(Side.BUY, 103L, 1L);
+        rest(Side.BUY, 101L, 1L);
+
+        assertThat(chain(Side.BUY)).containsExactly(103L, 101L, 100L);
+    }
+
+    @Test
+    void emptyingALevelTakesItOutOfTheChainWhereverItSat() {
+        Order best = rest(Side.SELL, 108L, 1L);
+        Order middle = rest(Side.SELL, 110L, 1L);
+        Order worst = rest(Side.SELL, 112L, 1L);
+
+        book.remove(middle);
+        assertThat(chain(Side.SELL)).containsExactly(108L, 112L);
+
+        book.remove(best);
+        assertThat(chain(Side.SELL)).containsExactly(112L);
+
+        book.remove(worst);
+        assertThat(chain(Side.SELL)).isEmpty();
+        assertThat(book.bestAsk()).isEqualTo(OrderBook.NO_ASK);
+    }
+
+    @Test
+    void aRecycledLevelDoesNotDragItsOldNeighboursBackWithIt() {
+        // Levels are pooled, so a stale nextLevel on a reused level would
+        // silently splice a dead price back into the ladder.
+        Order gone = rest(Side.SELL, 110L, 1L);
+        rest(Side.SELL, 111L, 1L);
+        book.remove(gone);
+
+        rest(Side.SELL, 115L, 1L);
+
+        assertThat(chain(Side.SELL)).containsExactly(111L, 115L);
+    }
+
     @Test
     void aPriceThatEmptiesAndComesBackIsTheBestAgain() {
         Order only = rest(Side.SELL, 110L, 10L);

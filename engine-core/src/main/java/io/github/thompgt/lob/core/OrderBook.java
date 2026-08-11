@@ -66,7 +66,8 @@ public final class OrderBook {
     private final Long2ObjectSortedMap<PriceLevel> asks = new Long2ObjectRBTreeMap<>();
 
     /**
-     * The front of each ladder, held directly.
+     * The front of each ladder, held directly — and the head of an intrusive
+     * best-to-worst list threaded through the levels themselves.
      *
      * <p>{@link #bestLevel} is the single most-called method in the engine — the
      * match loop asks for it on every pass — and no tree offers a
@@ -76,6 +77,13 @@ public final class OrderBook {
      * the answer is maintained instead of computed. Both fields are null exactly
      * when their ladder is empty; that correspondence is what
      * {@link #add} and {@link #discardIfEmpty} exist to preserve.
+     *
+     * <p>The list does the same for every path that walks <em>outwards</em> from
+     * the best price — {@link #fillableQuantity} and {@link #snapshot}. Those
+     * used to iterate the tree, and a fastutil tree iterator is an allocation
+     * per call, so a fill-or-kill submit allocated on a path documented as
+     * ~0 B/op. Following {@code nextLevel} removes the tree from the sweep
+     * entirely; what remains of the tree is price lookup in {@link #add}.
      */
     private PriceLevel bestBidLevel;
     private PriceLevel bestAskLevel;
@@ -104,7 +112,7 @@ public final class OrderBook {
         if (level == null) {
             level = acquireLevel(order.price);
             ladder.put(order.price, level);
-            promoteIfBest(order.side, level);
+            link(order.side, level);
         }
         level.add(order);
     }
@@ -212,7 +220,11 @@ public final class OrderBook {
      */
     public long fillableQuantity(Side aggressorSide, long limitPrice, long cap) {
         long total = 0L;
-        for (PriceLevel level : ladderFor(aggressorSide.opposite()).values()) {
+        // The intrusive list, not the tree: an iterator here would allocate on
+        // every fill-or-kill submit.
+        for (PriceLevel level = bestLevel(aggressorSide.opposite());
+                level != null;
+                level = level.nextLevel) {
             if (!aggressorSide.crosses(limitPrice, level.price())) {
                 break; // The ladder is sorted, so nothing further can cross either.
             }
@@ -240,7 +252,7 @@ public final class OrderBook {
      */
     public void snapshot(Side side, int maxLevels, DepthVisitor visitor) {
         int emitted = 0;
-        for (PriceLevel level : ladderFor(side).values()) {
+        for (PriceLevel level = bestLevel(side); level != null; level = level.nextLevel) {
             if (emitted == maxLevels) {
                 return;
             }
@@ -262,22 +274,58 @@ public final class OrderBook {
         if (!level.isEmpty()) {
             return;
         }
-        Long2ObjectSortedMap<PriceLevel> ladder = ladderFor(side);
-        ladder.remove(level.price());
-        if (bestLevel(side) == level) {
-            // Only the front of the ladder forces a recompute, and only when it
-            // is the level that just went away. Every other cancel is untouched.
-            setBest(side, ladder.isEmpty() ? null : ladder.get(ladder.firstLongKey()));
-        }
+        ladderFor(side).remove(level.price());
+        // The successor is the level's own next pointer, so losing the front of
+        // the ladder no longer costs a firstLongKey() descent plus a get().
+        unlink(side, level);
         releaseLevel(level);
     }
 
-    /** Makes a newly created level the front of its ladder if it belongs there. */
-    private void promoteIfBest(Side side, PriceLevel level) {
-        PriceLevel current = bestLevel(side);
-        if (current == null || side.isBetterPrice(level.price(), current.price())) {
+    /**
+     * Threads a newly created level into the best-to-worst list.
+     *
+     * <p>The insertion point is found by walking from the best price rather
+     * than asked of the tree, because every tree method that would answer it —
+     * a sub-map view, an iterator — allocates. The walk is O(levels), but it
+     * happens only when trading opens a price that was not there before, and
+     * that same moment already pays for a tree node.
+     */
+    private void link(Side side, PriceLevel level) {
+        PriceLevel head = bestLevel(side);
+        if (head == null || side.isBetterPrice(level.price(), head.price())) {
+            level.nextLevel = head;
+            if (head != null) {
+                head.prevLevel = level;
+            }
             setBest(side, level);
+            return;
         }
+        PriceLevel at = head;
+        while (at.nextLevel != null && side.isBetterPrice(at.nextLevel.price(), level.price())) {
+            at = at.nextLevel;
+        }
+        level.nextLevel = at.nextLevel;
+        level.prevLevel = at;
+        if (at.nextLevel != null) {
+            at.nextLevel.prevLevel = level;
+        }
+        at.nextLevel = level;
+    }
+
+    /** Takes a level back out of the list, promoting its successor if it led. */
+    private void unlink(Side side, PriceLevel level) {
+        PriceLevel prev = level.prevLevel;
+        PriceLevel next = level.nextLevel;
+        if (prev == null) {
+            setBest(side, next);
+        } else {
+            prev.nextLevel = next;
+        }
+        if (next != null) {
+            next.prevLevel = prev;
+        }
+        level.prevLevel = null;
+        level.nextLevel = null;
     }
 
     private void setBest(Side side, PriceLevel level) {
