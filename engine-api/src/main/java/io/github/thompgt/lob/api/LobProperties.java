@@ -32,6 +32,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                          exist so a level's cached total cannot be driven to
  *                          overflow — see
  *                          {@link io.github.thompgt.lob.core.MatchingEngine#DEFAULT_MAX_PRICE}
+ * @param selfTradePolicy   what to do when an account reaches its own resting
+ *                          order. {@code OFF} by default, since a client only
+ *                          has an identity if it sends {@code accountId}
  */
 @ConfigurationProperties(prefix = "lob")
 public record LobProperties(
@@ -44,7 +47,8 @@ public record LobProperties(
         long depthIntervalMs,
         long metricsIntervalMs,
         long maxPrice,
-        long maxQuantity) {
+        long maxQuantity,
+        io.github.thompgt.lob.core.SelfTradePolicy selfTradePolicy) {
 
     private static final List<String> DEFAULT_SYMBOLS = List.of("AAPL", "MSFT", "NVDA");
 
@@ -66,5 +70,7 @@ public record LobProperties(
                 ? io.github.thompgt.lob.core.MatchingEngine.DEFAULT_MAX_PRICE : maxPrice;
         maxQuantity = maxQuantity <= 0
                 ? io.github.thompgt.lob.core.MatchingEngine.DEFAULT_MAX_QUANTITY : maxQuantity;
+        selfTradePolicy = selfTradePolicy == null
+                ? io.github.thompgt.lob.core.SelfTradePolicy.OFF : selfTradePolicy;
     }
 }

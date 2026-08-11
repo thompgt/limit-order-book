@@ -89,6 +89,10 @@ public final class MatchingEngine {
 
     private final long maxPrice;
     private final long maxQuantity;
+    private final SelfTradePolicy selfTradePolicy;
+
+    /** Set by {@link #match} when a self-trade ends the sweep. */
+    private boolean selfTradeHalted;
 
     public MatchingEngine() {
         this(ExecutionSink.NO_OP);
@@ -108,6 +112,23 @@ public final class MatchingEngine {
      * @see #DEFAULT_MAX_PRICE
      */
     public MatchingEngine(ExecutionSink sink, OrderPool pool, long maxPrice, long maxQuantity) {
+        this(sink, pool, maxPrice, maxQuantity, SelfTradePolicy.OFF);
+    }
+
+    /**
+     * @param maxPrice        highest acceptable limit price in ticks
+     * @param maxQuantity     largest acceptable order quantity
+     * @param selfTradePolicy what to do when an account reaches its own resting
+     *                        order. {@link SelfTradePolicy#OFF} keeps the
+     *                        matching loop exactly as the benchmarks measure it
+     * @see #DEFAULT_MAX_PRICE
+     */
+    public MatchingEngine(
+            ExecutionSink sink,
+            OrderPool pool,
+            long maxPrice,
+            long maxQuantity,
+            SelfTradePolicy selfTradePolicy) {
         if (maxPrice <= 0 || maxQuantity <= 0) {
             throw new IllegalArgumentException("maxPrice and maxQuantity must be positive");
         }
@@ -116,6 +137,12 @@ public final class MatchingEngine {
         this.index = new OrderIndex();
         this.maxPrice = maxPrice;
         this.maxQuantity = maxQuantity;
+        this.selfTradePolicy = selfTradePolicy;
+    }
+
+    /** What happens when an account reaches its own resting order. */
+    public SelfTradePolicy selfTradePolicy() {
+        return selfTradePolicy;
     }
 
     /** Highest limit price this engine will accept, in ticks. */
@@ -191,7 +218,22 @@ public final class MatchingEngine {
             long price,
             long quantity) {
 
-        return submitOrder(orderId, symbolId, side, timeInForce, price, quantity, true);
+        return submitOrder(
+                orderId, symbolId, Order.NO_ACCOUNT, side, timeInForce, price, quantity, true);
+    }
+
+    /** As above, for an order whose sender is known. @see SelfTradePolicy */
+    public SubmitResult submit(
+            long orderId,
+            int symbolId,
+            long accountId,
+            Side side,
+            TimeInForce timeInForce,
+            long price,
+            long quantity) {
+
+        return submitOrder(
+                orderId, symbolId, accountId, side, timeInForce, price, quantity, true);
     }
 
     /**
@@ -205,13 +247,26 @@ public final class MatchingEngine {
      */
     public SubmitResult submitMarket(
             long orderId, int symbolId, Side side, TimeInForce timeInForce, long quantity) {
+        return submitMarket(orderId, symbolId, Order.NO_ACCOUNT, side, timeInForce, quantity);
+    }
+
+    /** As above, for an order whose sender is known. @see SelfTradePolicy */
+    public SubmitResult submitMarket(
+            long orderId,
+            int symbolId,
+            long accountId,
+            Side side,
+            TimeInForce timeInForce,
+            long quantity) {
         return submitOrder(
-                orderId, symbolId, side, timeInForce, side.marketPrice(), quantity, false);
+                orderId, symbolId, accountId, side, timeInForce,
+                side.marketPrice(), quantity, false);
     }
 
     private SubmitResult submitOrder(
             long orderId,
             int symbolId,
+            long accountId,
             Side side,
             TimeInForce timeInForce,
             long price,
@@ -228,8 +283,8 @@ public final class MatchingEngine {
 
         OrderBook book = books.get(symbolId);
         long sequence = ++nextSequence;
-        Order order = pool.acquire()
-                .reset(orderId, symbolId, side, timeInForce, price, quantity, sequence);
+        Order order = pool.acquire().reset(
+                orderId, symbolId, accountId, side, timeInForce, price, quantity, sequence);
         sink.accepted(order);
 
         if (timeInForce == TimeInForce.FOK
@@ -246,6 +301,13 @@ public final class MatchingEngine {
             result.complete(OrderStatus.FILLED, 0L, sequence);
             pool.release(order);
             return result;
+        }
+
+        if (selfTradeHalted) {
+            // The sweep stopped at the account's own quote, so the remainder
+            // has nowhere to go: resting it would leave the book crossed
+            // against an order it is not allowed to trade with.
+            return kill(order, CancelReason.SELF_TRADE, sequence);
         }
 
         if (!timeInForce.restsOnBook() || order.isMarket()) {
@@ -420,6 +482,14 @@ public final class MatchingEngine {
             return result;
         }
 
+        if (selfTradeHalted) {
+            index.remove(orderId);
+            sink.canceled(order, CancelReason.SELF_TRADE);
+            result.complete(OrderStatus.CANCELED, 0L, sequence);
+            pool.release(order);
+            return result;
+        }
+
         // Still in the index throughout — the id never stopped being live.
         book.add(order);
         sink.rested(order);
@@ -472,6 +542,7 @@ public final class MatchingEngine {
     private void match(OrderBook book, Order aggressor) {
         Side passiveSide = aggressor.side.opposite();
         int symbolId = aggressor.symbolId;
+        selfTradeHalted = false;
 
         while (aggressor.remainingQuantity > 0) {
             PriceLevel level = book.bestLevel(passiveSide);
@@ -487,6 +558,29 @@ public final class MatchingEngine {
                 Order resting = level.head();
                 if (resting == null) {
                     break;
+                }
+
+                if (selfTradePolicy != SelfTradePolicy.OFF && isSelfTrade(aggressor, resting)) {
+                    if (selfTradePolicy.cancelsAggressor()) {
+                        selfTradeHalted = true;
+                    }
+                    if (selfTradePolicy.cancelsResting()) {
+                        book.remove(resting);
+                        index.remove(resting.orderId);
+                        sink.canceled(resting, CancelReason.SELF_TRADE);
+                        pool.release(resting);
+                    }
+                    if (selfTradeHalted) {
+                        return;
+                    }
+                    // The resting order is gone and the aggressor lives on, so
+                    // the next head is a different order and the loop makes
+                    // progress. Ask the book, not the level: removing the last
+                    // order at a price hands the level back to the free list.
+                    if (book.bestLevel(passiveSide) != level) {
+                        break;
+                    }
+                    continue;
                 }
 
                 long quantity = Math.min(aggressor.remainingQuantity, resting.remainingQuantity);
@@ -508,6 +602,17 @@ public final class MatchingEngine {
                 }
             }
         }
+    }
+
+    /**
+     * True when both orders name the same account. {@link Order#NO_ACCOUNT}
+     * never matches: two anonymous orders are two participants as far as the
+     * engine can tell, and guessing otherwise would stop unrelated clients
+     * trading with each other.
+     */
+    private static boolean isSelfTrade(Order aggressor, Order resting) {
+        return aggressor.accountId != Order.NO_ACCOUNT
+                && aggressor.accountId == resting.accountId;
     }
 
     @Override

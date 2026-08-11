@@ -75,11 +75,12 @@ public class OrderController {
         // Read only for a limit order: a market order has no price, and asking
         // for one would reject a request that is perfectly well formed.
         long price = market ? 0L : request.limitPrice();
+        long accountId = request.accountOrNone();
 
         OrderResponse response = call(engine -> {
             SubmitResult result = market
-                    ? engine.submitMarket(orderId, symbolId, side, tif, quantity)
-                    : engine.submit(orderId, symbolId, side, tif, price, quantity);
+                    ? engine.submitMarket(orderId, symbolId, accountId, side, tif, quantity)
+                    : engine.submit(orderId, symbolId, accountId, side, tif, price, quantity);
             // Copied here, on the engine thread, before the next command
             // overwrites the result object. See EngineDispatcher.
             return OrderResponse.from(result, symbol);

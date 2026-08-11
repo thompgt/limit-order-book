@@ -15,6 +15,9 @@ import io.github.thompgt.lob.core.TimeInForce;
  * @param orderId      optional client-supplied id. Omit and the service assigns
  *                     one — ids must be unique among live orders, so letting the
  *                     client choose is what makes a duplicate-id reject possible
+ * @param accountId    optional participant identity. Only orders that carry one
+ *                     can be kept from trading with each other — see
+ *                     {@link io.github.thompgt.lob.core.SelfTradePolicy}
  */
 public record NewOrderRequest(
         String symbol,
@@ -23,9 +26,15 @@ public record NewOrderRequest(
         String timeInForce,
         Long price,
         long quantity,
-        Long orderId) {
+        Long orderId,
+        Long accountId) {
 
     public enum OrderType { LIMIT, MARKET }
+
+    /** @return the account, or {@code NO_ACCOUNT} when the client is anonymous */
+    public long accountOrNone() {
+        return accountId == null ? io.github.thompgt.lob.core.Order.NO_ACCOUNT : accountId;
+    }
 
     public Side parsedSide() {
         return parseEnum(Side.class, side, "side", null);

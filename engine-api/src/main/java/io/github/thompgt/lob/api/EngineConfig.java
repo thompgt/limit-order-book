@@ -42,8 +42,12 @@ public class EngineConfig {
         OrderPool pool = new OrderPool(properties.orderPoolCapacity());
         pool.preallocate(properties.orderPoolCapacity());
 
-        MatchingEngine engine =
-                new MatchingEngine(sink, pool, properties.maxPrice(), properties.maxQuantity());
+        MatchingEngine engine = new MatchingEngine(
+                sink,
+                pool,
+                properties.maxPrice(),
+                properties.maxQuantity(),
+                properties.selfTradePolicy());
         for (int symbolId : symbols.ids()) {
             engine.registerSymbol(symbolId);
         }

@@ -28,6 +28,10 @@ lob:
   # negative and depth, fillable quantity and FOK all start lying.
   max-price: 1000000000000
   max-quantity: 1000000000000
+  # OFF, CANCEL_RESTING, CANCEL_AGGRESSOR or CANCEL_BOTH. Off by default: a
+  # client only has an identity to compare if it sends accountId, and the
+  # benchmarks measure the loop without the check.
+  self-trade-policy: OFF
 
 management:
   endpoints:

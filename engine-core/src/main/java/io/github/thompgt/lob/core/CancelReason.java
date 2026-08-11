@@ -24,5 +24,12 @@ public enum CancelReason {
      * was killed before touching the book. No trades were emitted for it: the
      * check happens first precisely so there is nothing to unwind.
      */
-    FILL_OR_KILL
+    FILL_OR_KILL,
+
+    /**
+     * The order would have traded against another order from the same account,
+     * and {@link SelfTradePolicy} says not to let it. Whether this names the
+     * resting order, the aggressive one, or both depends on the policy.
+     */
+    SELF_TRADE
 }

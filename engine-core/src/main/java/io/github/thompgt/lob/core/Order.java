@@ -19,11 +19,22 @@ package io.github.thompgt.lob.core;
  */
 public final class Order {
 
+    /** No participant identity was supplied. Never matches another account. */
+    public static final long NO_ACCOUNT = 0L;
+
     /** Client-visible identifier. Unique across the engine. */
     long orderId;
 
     /** Which book this order belongs to. */
     int symbolId;
+
+    /**
+     * Who sent it. {@link #NO_ACCOUNT} when the boundary does not identify
+     * participants, which is the default — the engine is happy not to know, but
+     * without it there is nothing for {@link SelfTradePolicy} to compare, and a
+     * client can lift its own quote.
+     */
+    long accountId;
 
     Side side;
     TimeInForce timeInForce;
@@ -67,8 +78,22 @@ public final class Order {
             long price,
             long quantity,
             long sequence) {
+        return reset(orderId, symbolId, NO_ACCOUNT, side, timeInForce, price, quantity, sequence);
+    }
+
+    /** As above, for an order whose sender is known. */
+    public Order reset(
+            long orderId,
+            int symbolId,
+            long accountId,
+            Side side,
+            TimeInForce timeInForce,
+            long price,
+            long quantity,
+            long sequence) {
         this.orderId = orderId;
         this.symbolId = symbolId;
+        this.accountId = accountId;
         this.side = side;
         this.timeInForce = timeInForce;
         this.price = price;
@@ -100,6 +125,11 @@ public final class Order {
 
     public int symbolId() {
         return symbolId;
+    }
+
+    /** Who sent it, or {@link #NO_ACCOUNT} if the boundary did not say. */
+    public long accountId() {
+        return accountId;
     }
 
     public Side side() {
