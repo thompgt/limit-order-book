@@ -139,15 +139,25 @@ public final class OrderBook {
      * Applies a fill against a resting order, keeping the level's cached total
      * in step. The order holds its place in the queue while any quantity
      * remains; once it is fully filled it leaves the book.
+     *
+     * <p>Returns whether the level survived, because the caller cannot ask it
+     * afterwards: emptying a level hands it back to the free list, and the
+     * matching loop reading {@code level.head()} on a level that has been
+     * released is only correct for as long as nothing re-acquires one
+     * mid-sweep. Reporting it here means the loop never touches a level it no
+     * longer owns.
+     *
+     * @return {@code true} if the level still holds orders
      */
-    public void reduce(Order order, long quantity) {
+    public boolean reduce(Order order, long quantity) {
         PriceLevel level = order.level;
         Side side = order.side;
         level.reduce(order, quantity);
         if (order.remainingQuantity == 0) {
             level.remove(order);
-            discardIfEmpty(side, level);
+            return !discardIfEmpty(side, level);
         }
+        return true;
     }
 
     /**
@@ -270,15 +280,16 @@ public final class OrderBook {
      * left in place would make {@link #bestBid()} report a price with nothing
      * behind it.
      */
-    private void discardIfEmpty(Side side, PriceLevel level) {
+    private boolean discardIfEmpty(Side side, PriceLevel level) {
         if (!level.isEmpty()) {
-            return;
+            return false;
         }
         ladderFor(side).remove(level.price());
         // The successor is the level's own next pointer, so losing the front of
         // the ladder no longer costs a firstLongKey() descent plus a get().
         unlink(side, level);
         releaseLevel(level);
+        return true;
     }
 
     /**

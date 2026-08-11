@@ -463,6 +463,11 @@ public final class MatchingEngine {
      * {@link OrderBook#reduce} and its links nulled, so the head <em>is</em> the
      * next order to fill. Progress is guaranteed because every iteration trades
      * a positive quantity.
+     *
+     * <p>It stops touching a level the moment {@code reduce} reports the level
+     * gone. Emptying a level returns it to the free list, so reading it again
+     * is a use-after-release — harmless only for as long as nothing re-acquires
+     * a level mid-sweep, which is not a property worth depending on.
      */
     private void match(OrderBook book, Order aggressor) {
         Side passiveSide = aggressor.side.opposite();
@@ -486,7 +491,7 @@ public final class MatchingEngine {
 
                 long quantity = Math.min(aggressor.remainingQuantity, resting.remainingQuantity);
                 aggressor.remainingQuantity -= quantity;
-                book.reduce(resting, quantity);
+                boolean levelSurvived = book.reduce(resting, quantity);
                 result.recordTrade(quantity);
 
                 sink.trade(++nextTradeId, symbolId, tradePrice, quantity, aggressor, resting);
@@ -495,6 +500,11 @@ public final class MatchingEngine {
                     sink.filled(resting);
                     index.remove(resting.orderId);
                     pool.release(resting);
+                }
+
+                if (!levelSurvived) {
+                    // The level is back in the free list; do not read it again.
+                    break;
                 }
             }
         }
