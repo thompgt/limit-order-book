@@ -124,6 +124,20 @@ class OrderControllerTest {
     }
 
     @Test
+    void aClientIdInsideTheServersRangeIsRefused() throws Exception {
+        // Otherwise the server's own sequence eventually reaches it and 409s an
+        // order that was never a duplicate of anything the client sent.
+        mvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"symbol":"AAPL","side":"BUY","price":9000,"quantity":1,
+                                 "orderId":1000000000}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("1000000000")));
+    }
+
+    @Test
     void aLimitOrderWithoutAPriceIsRefusedRatherThanRestingAtTickZero() throws Exception {
         mvc.perform(post("/api/v1/orders")
                         .contentType(MediaType.APPLICATION_JSON)

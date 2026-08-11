@@ -48,11 +48,16 @@ public class OrderController {
     private final LobProperties properties;
 
     /**
-     * Ids for clients that do not bring their own. Server-side ids start high
-     * enough that they cannot collide with the small ids a client is likely to
-     * pick by hand.
+     * Where server-assigned ids begin. Everything at or above this belongs to
+     * the service, and a client id in the range is refused: "high enough that a
+     * client is unlikely to pick one" is not a guarantee, and the sequence will
+     * eventually walk into whatever a client did pick and 409 on an order that
+     * was perfectly valid.
      */
-    private final AtomicLong nextOrderId = new AtomicLong(1_000_000_000L);
+    static final long SERVER_ID_BASE = 1_000_000_000L;
+
+    /** Ids for clients that do not bring their own. */
+    private final AtomicLong nextOrderId = new AtomicLong(SERVER_ID_BASE);
 
     public OrderController(
             EngineDispatcher dispatcher, SymbolRegistry symbols, LobProperties properties) {
@@ -67,7 +72,7 @@ public class OrderController {
         int symbolId = symbols.idOf(symbol);
         long orderId = request.orderId() == null
                 ? nextOrderId.getAndIncrement()
-                : request.orderId();
+                : clientId(request.orderId());
         var side = request.parsedSide();
         var tif = request.parsedTimeInForce();
         long quantity = request.quantity();
@@ -146,6 +151,16 @@ public class OrderController {
 
     private <T> T call(java.util.function.Function<io.github.thompgt.lob.core.MatchingEngine, T> command) {
         return dispatcher.call(command, properties.commandTimeoutMs());
+    }
+
+    /** Keeps client ids out of the range the server hands out for itself. */
+    private static long clientId(long orderId) {
+        if (orderId >= SERVER_ID_BASE) {
+            throw new io.github.thompgt.lob.api.dto.BadRequestException(
+                    "orderId must be below " + SERVER_ID_BASE
+                            + "; ids at or above it are assigned by the service");
+        }
+        return orderId;
     }
 
     private ResponseEntity<OrderResponse> respond(OrderResponse response, HttpStatus accepted) {
