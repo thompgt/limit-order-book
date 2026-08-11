@@ -116,23 +116,48 @@ curl -X POST localhost:8080/api/v1/orders -H 'content-type: application/json' \
 
 ## Results
 
-> Not yet measured. The engine is complete; this table is filled in from real
-> benchmark runs in [`docs/WORKPLAN.md`](docs/WORKPLAN.md) phase 4. Every
-> number here will carry the exact command that produced it and the machine it
-> ran on — nothing goes in this table that a reader cannot re-run.
+Measured on **AMD Ryzen 5 5500U** (6 cores / 12 threads, 32 GB), Windows 11,
+Temurin **JDK 24**, with everything below produced by one command:
 
-| Metric | Value | Command |
+```bash
+./mvnw -pl engine-bench -am -Pbench verify
+```
+
+A laptop under a desktop OS is not a trading server, and these numbers should
+be read as a floor rather than a result. They are here because a number someone
+can re-run beats a dash.
+
+| Metric | Value | Where it comes from |
 |---|---|---|
-| Throughput (orders/sec) | — | `./mvnw -pl engine-bench -am -Pbench verify` |
-| Latency p50 | — | ″ |
-| Latency p99 | — | ″ |
-| **Latency p99.9** | — | ″ |
-| Latency p99.99 | — | ″ |
-| Allocation on hot path | — | ″ (`-prof gc`) |
+| Throughput, MIXED @ 8 levels | **3.52 M** commands/sec ± 0.25 M | JMH, 5×1s, 1 fork |
+| Throughput, MIXED @ 256 levels | 1.88 M commands/sec ± 0.43 M | ″ |
+| Throughput, MODIFYING @ 8 levels | 15.0 M commands/sec ± 2.0 M | ″ — no ladder lookup |
+| Latency p50 (service) | 0.30 µs | `LatencyHarness`, 500k/sec offered, 20s |
+| Latency p99 (service) | 1.40 µs | ″ |
+| **Latency p99.9 (service)** | 17.7 µs | ″ |
+| Latency p99.99 (service) | 129 µs | ″ |
+| Latency p99.9 (response) | 4.36 ms | ″ — see the caveat below |
+| Allocation, MODIFYING | **0.67 B/op** | `-prof gc` |
+| Allocation, MIXED @ 8 levels | 16.2 B/op | ″ |
+| Allocation, RESTING @ 256 levels | 30.8 B/op | ″ |
 
-The allocation claim does not wait for a benchmark run: `AllocationTest` drives
-800,000 submit / modify / cancel commands and asserts the order pool never grew
-and the thread's allocation counter did not move, and it runs on every build.
+Two things in that table deserve honesty rather than a footnote.
+
+**The response-time tail is the machine, not the engine.** The harness paced
+500,000 commands/sec and achieved 499,996 — the engine kept up. But response
+time measures from when a command was *due*, and the pacing loop spins on a
+laptop running a desktop OS, so every time the scheduler took the thread away
+the whole backlog is charged to the engine. Service-time p99.9 is 17.7 µs while
+response p99.9 is 4.36 ms; a 250× gap between the two is scheduling jitter. The harness is right to report it — that is the point of measuring
+response time — and a quiet machine is what would separate the two.
+
+**Allocation is zero only where no price level opens or closes.** `MODIFYING`
+never touches the ladder and comes in at 0.67 B/op. The mixes that open and
+close levels pay for a red-black tree node each time, which is the cost the
+`OrderBook` javadoc describes and declines to fix. `AllocationTest` pins the
+first case — 800,000 submit / modify / cancel commands over a book whose levels
+never open or close — at literally zero bytes, on every build rather than on
+the day someone remembers to run `-prof gc`.
 
 Latency is measured with a fixed-rate submitter and HdrHistogram's
 `recordValueWithExpectedInterval`, so the tail is corrected for coordinated

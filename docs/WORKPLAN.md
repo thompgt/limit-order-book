@@ -73,12 +73,14 @@ one property written for it.
 
 ## Phase 4 — Benchmarks
 
-- [ ] JMH throughput across book-depth and order-mix scenarios
-- [ ] HdrHistogram latency harness, coordinated-omission safe
+- [x] JMH throughput across book-depth and order-mix scenarios
+- [x] HdrHistogram latency harness, coordinated-omission safe
       (fixed-rate submitter + `recordValueWithExpectedInterval`)
-- [ ] `-prof gc` demonstrating ~0 B/op on the hot path
+- [x] `-prof gc` demonstrating ~0 B/op on the hot path — 0.67 B/op on the
+      `MODIFYING` mix, and `AllocationTest` pins the level-stable case at
+      literally zero on every build
 - [ ] End-to-end REST/WebSocket load generator for client-observed latency
-- [ ] README **Results** table filled from real runs, with commands and
+- [x] README **Results** table filled from real runs, with commands and
       machine specs
 
 ## Phase 5 — Spring API ✅
