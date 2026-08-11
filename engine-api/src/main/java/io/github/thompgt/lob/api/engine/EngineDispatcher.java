@@ -81,16 +81,28 @@ public final class EngineDispatcher implements AutoCloseable {
     /**
      * Queues a command and waits for it.
      *
+     * <p>Giving up abandons the command as well as the wait. Telling a caller
+     * "this did not happen" while the command sat in the queue waiting to be
+     * applied is the worst of both answers: a client that retries on the 503 —
+     * which the {@code Retry-After} invites it to do — would submit twice and
+     * the book would hold two orders. So the future is failed here, and the
+     * engine thread skips any command whose future is already settled.
+     *
      * @throws EngineBusyException if the queue is full or the wait times out
      */
     public <T> T call(Function<MatchingEngine, T> command, long timeoutMs) {
+        CompletableFuture<T> future = execute(command);
         try {
-            return execute(command).get(timeoutMs, TimeUnit.MILLISECONDS);
+            return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            future.completeExceptionally(
+                    new EngineBusyException("interrupted waiting for the engine"));
             throw new EngineBusyException("interrupted waiting for the engine");
         } catch (java.util.concurrent.TimeoutException e) {
-            throw new EngineBusyException("engine did not respond within " + timeoutMs + "ms");
+            String message = "engine did not respond within " + timeoutMs + "ms";
+            future.completeExceptionally(new EngineBusyException(message));
+            throw new EngineBusyException(message);
         } catch (java.util.concurrent.ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof RuntimeException runtime) {
@@ -154,6 +166,15 @@ public final class EngineDispatcher implements AutoCloseable {
             Function<MatchingEngine, T> function, CompletableFuture<T> future) {
 
         void runOn(MatchingEngine engine) {
+            if (future.isDone()) {
+                // The caller already timed out or was failed on shutdown, and
+                // has been told the command did not happen. Applying it now
+                // would make that answer a lie. The check is not a fence — a
+                // timeout landing mid-apply still applies — but it closes the
+                // window that matters, which is a command queued behind a
+                // backlog longer than the caller's timeout.
+                return;
+            }
             try {
                 future.complete(function.apply(engine));
             } catch (RuntimeException e) {

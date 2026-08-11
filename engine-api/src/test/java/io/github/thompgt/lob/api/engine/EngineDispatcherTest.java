@@ -181,6 +181,39 @@ class EngineDispatcherTest {
     }
 
     @Test
+    void aCommandThatTimedOutIsNeverApplied() throws Exception {
+        MatchingEngine idle = new MatchingEngine();
+        idle.registerSymbol(SYMBOL);
+        try (EngineDispatcher blocked = new EngineDispatcher(idle, 16)) {
+            CountDownLatch release = new CountDownLatch(1);
+            blocked.start();
+            // Hold the engine thread so the next command has to wait behind it.
+            blocked.execute(e -> {
+                try {
+                    release.await();
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                }
+                return null;
+            });
+
+            // The caller gives up. It is told the order did not happen, so a
+            // client retrying on the 503 must not end up submitting twice.
+            assertThatThrownBy(() -> blocked.call(
+                    e -> e.submit(1L, SYMBOL, Side.BUY, TimeInForce.DAY, 100L, 5L).status(),
+                    50L))
+                    .isInstanceOf(EngineBusyException.class);
+
+            release.countDown();
+            int live = blocked.call(MatchingEngine::liveOrderCount, TIMEOUT_MS);
+            long resting =
+                    blocked.call(e -> e.book(SYMBOL).quantityAt(Side.BUY, 100L), TIMEOUT_MS);
+            assertThat(live).isZero();
+            assertThat(resting).isZero();
+        }
+    }
+
+    @Test
     void shuttingDownFailsWhateverIsStillWaitingInsteadOfLeavingItHanging() {
         MatchingEngine idle = new MatchingEngine();
         EngineDispatcher closing = new EngineDispatcher(idle, 16);
